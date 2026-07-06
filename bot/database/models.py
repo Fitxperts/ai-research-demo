@@ -133,7 +133,7 @@ class Property(Base):
         DateTime(), default=timeutils.now
     )
 
-    meetings: Mapped[list["Meeting"]] = relationship(
+    meetings: Mapped[list[Meeting]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
 
@@ -168,7 +168,7 @@ class Client(Base):
         DateTime(), default=timeutils.now
     )
 
-    meetings: Mapped[list["Meeting"]] = relationship(
+    meetings: Mapped[list[Meeting]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 
@@ -195,8 +195,8 @@ class Meeting(Base):
     reminded_2h: Mapped[bool] = mapped_column(Boolean, default=False)
     reminded_30m: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    client: Mapped["Client"] = relationship(back_populates="meetings")
-    property: Mapped["Property"] = relationship(back_populates="meetings")
+    client: Mapped[Client] = relationship(back_populates="meetings")
+    property: Mapped[Property] = relationship(back_populates="meetings")
 
 
 class BotUser(Base):

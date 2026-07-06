@@ -7,8 +7,6 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.utils import timeutils
-
 from bot.database.models import (
     BotUser,
     Client,
@@ -21,6 +19,7 @@ from bot.database.models import (
     PropertyType,
     UserRole,
 )
+from bot.utils import timeutils
 
 # Префикс идентификатора объекта по типу недвижимости (APT_1001, HSE_1001, ...)
 _KIND_PREFIX = {
