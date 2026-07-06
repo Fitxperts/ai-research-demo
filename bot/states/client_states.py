@@ -1,17 +1,13 @@
-"""FSM-состояния сценария клиента (подбор недвижимости)."""
+"""FSM-состояния сценария клиента (заявка на подбор недвижимости)."""
 from aiogram.fsm.state import State, StatesGroup
 
 
-class ClientSearch(StatesGroup):
-    deal_type = State()
-    property_type = State()
-    district = State()
-    budget = State()
-    rooms = State()
-    confirm = State()
-
-
-class ClientAI(StatesGroup):
-    """Свободный диалог с ИИ-ассистентом по подбору."""
-
-    chatting = State()
+class ClientForm(StatesGroup):
+    deal_type = State()   # аренда или покупка
+    district = State()    # район
+    budget = State()      # бюджет
+    rooms = State()       # количество комнат
+    residents = State()   # кто будет жить
+    move_date = State()   # дата заселения
+    phone = State()       # телефон
+    confirm = State()     # подтверждение

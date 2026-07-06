@@ -3,60 +3,89 @@ from __future__ import annotations
 
 from html import escape
 
-from bot.database.models import DealType, Listing, PropertyType
+from bot.database.models import (
+    Client,
+    ClientDealType,
+    Property,
+    PropertyKind,
+    PropertyType,
+)
 
-_PROPERTY_LABELS = {
-    PropertyType.apartment: "Квартира",
-    PropertyType.house: "Дом",
-    PropertyType.room: "Комната",
-    PropertyType.commercial: "Коммерческая",
+CLIENT_DEAL_LABELS = {ClientDealType.rent: "Аренда", ClientDealType.buy: "Покупка"}
+PROPERTY_TYPE_LABELS = {PropertyType.rent: "Аренда", PropertyType.sale: "Продажа"}
+KIND_LABELS = {
+    PropertyKind.apartment: "Квартира",
+    PropertyKind.house: "Дом",
+    PropertyKind.land: "Участок",
+    PropertyKind.commercial: "Коммерческая",
 }
 
-_DEAL_LABELS = {
-    DealType.sale: "Продажа",
-    DealType.rent: "Аренда",
-}
+
+def format_money(value: float | None, currency: str | None) -> str:
+    if value is None:
+        return "—"
+    return f"{int(value):,}".replace(",", " ") + f" {currency or ''}".rstrip()
 
 
-def property_label(value: PropertyType) -> str:
-    return _PROPERTY_LABELS.get(value, value.value)
-
-
-def deal_label(value: DealType) -> str:
-    return _DEAL_LABELS.get(value, value.value)
-
-
-def format_price(value: float) -> str:
-    return f"{int(value):,}".replace(",", " ") + " ₽"
-
-
-def format_listing(listing: Listing, *, with_status: bool = False) -> str:
-    lines = [f"<b>{escape(listing.title)}</b>"]
-    lines.append(
-        f"{deal_label(listing.deal_type)} · {property_label(listing.property_type)}"
-    )
-    lines.append(f"💰 <b>{format_price(float(listing.price))}</b>")
-
-    details: list[str] = []
-    if listing.rooms:
-        details.append(f"🛏 {listing.rooms}-комн.")
-    if listing.area:
-        details.append(f"📐 {float(listing.area):g} м²")
-    if details:
-        lines.append(" · ".join(details))
-
-    if listing.district:
-        lines.append(f"📍 {escape(listing.district)}")
-    if listing.address:
-        lines.append(f"🏠 {escape(listing.address)}")
-    if listing.description:
-        lines.append("")
-        lines.append(escape(listing.description))
-
-    if with_status:
-        lines.append("")
-        lines.append(f"Статус: <i>{listing.status.value}</i>")
-        if listing.reject_reason:
-            lines.append(f"Причина отклонения: {escape(listing.reject_reason)}")
-
+def format_client_card(client: Client) -> str:
+    deal = CLIENT_DEAL_LABELS.get(client.deal_type, client.deal_type.value)
+    lines = [
+        f"🆕 <b>Заявка {escape(client.id)}</b>",
+        f"👤 {escape(client.name or '—')}",
+        f"📞 {escape(client.phone or '—')}",
+        "",
+        f"Сделка: <b>{deal}</b>",
+        f"Район: {escape(client.district or '—')}",
+        f"Комнат: {client.rooms if client.rooms else '—'}",
+        f"Бюджет: <b>{format_money(client.budget, client.currency)}</b>",
+        f"Кто будет жить: {escape(client.residents or '—')}",
+    ]
+    if client.move_date:
+        lines.append(f"Заселение: {client.move_date.strftime('%d.%m.%Y')}")
     return "\n".join(lines)
+
+
+def format_property_card(prop: Property) -> str:
+    kind = KIND_LABELS.get(prop.property_kind, prop.property_kind.value)
+    deal = PROPERTY_TYPE_LABELS.get(prop.type, prop.type.value)
+    lines = [f"🏠 <b>{kind} · {deal}</b> <code>{escape(prop.id)}</code>"]
+
+    location = ", ".join(x for x in (prop.district, prop.address) if x)
+    if location:
+        lines.append(f"📍 {escape(location)}")
+
+    facts: list[str] = []
+    if prop.rooms:
+        facts.append(f"🛏 {prop.rooms}-комн.")
+    if prop.area:
+        facts.append(f"📐 {prop.area:g} м²")
+    if prop.floor and prop.floors:
+        facts.append(f"🏢 {prop.floor}/{prop.floors} эт.")
+    if facts:
+        lines.append(" · ".join(facts))
+
+    price = format_money(prop.price, prop.currency)
+    if prop.negotiable:
+        price += " (торг)"
+    lines.append(f"💰 <b>{price}</b>")
+
+    comms = _communications(prop)
+    if comms:
+        lines.append("✅ " + ", ".join(comms))
+
+    if prop.description:
+        lines.append("")
+        lines.append(escape(prop.description))
+    return "\n".join(lines)
+
+
+def _communications(prop: Property) -> list[str]:
+    mapping = [
+        (prop.furniture, "мебель"),
+        (prop.appliances, "техника"),
+        (prop.gas, "газ"),
+        (prop.water, "вода"),
+        (prop.electricity, "свет"),
+        (prop.internet, "интернет"),
+    ]
+    return [label for present, label in mapping if present]

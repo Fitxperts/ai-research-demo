@@ -1,9 +1,25 @@
 """Валидаторы пользовательского ввода."""
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 _PHONE_RE = re.compile(r"^\+?\d[\d\s\-()]{7,17}\d$")
+_DATE_FORMATS = ("%d.%m.%Y", "%d.%m.%y", "%d.%m")
+
+
+def parse_date(text: str) -> dt.date | None:
+    """Разобрать дату вида ДД.ММ.ГГГГ / ДД.ММ.ГГ / ДД.ММ (год — текущий)."""
+    text = text.strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            parsed = dt.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+        if fmt == "%d.%m":
+            parsed = parsed.replace(year=dt.date.today().year)
+        return parsed
+    return None
 
 
 def parse_price(text: str) -> float | None:
