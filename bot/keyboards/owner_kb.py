@@ -86,3 +86,14 @@ def confirm_kb() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def dup_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, добавить", callback_data=f"{PREFIX}:dupyes"),
+                InlineKeyboardButton(text="❌ Нет", callback_data=f"{PREFIX}:dupno"),
+            ]
+        ]
+    )

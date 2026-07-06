@@ -103,6 +103,21 @@ def format_property_card(prop: Property) -> str:
     return "\n".join(lines)
 
 
+def format_property_brief(prop: Property) -> str:
+    """Краткая строка объекта: APT_1012 (Чиланзар, 2к, 65м², 450 сум)."""
+    details: list[str] = []
+    if prop.district:
+        details.append(prop.district)
+    if prop.rooms:
+        details.append(f"{prop.rooms}к")
+    if prop.area:
+        details.append(f"{prop.area:g}м²")
+    if prop.price:
+        details.append(format_money(prop.price, prop.currency))
+    inner = ", ".join(details)
+    return f"{escape(prop.id)} ({escape(inner)})" if inner else escape(prop.id)
+
+
 def format_client_short(client: Client) -> str:
     deal = CLIENT_DEAL_LABELS.get(client.deal_type, client.deal_type.value)
     status = CLIENT_STATUS_LABELS.get(client.status, client.status.value)

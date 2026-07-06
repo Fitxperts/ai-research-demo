@@ -20,9 +20,10 @@ from bot.database.models import (
 )
 from bot.keyboards import owner_kb
 from bot.keyboards.admin_kb import moderation_kb
+from bot.services import duplicate_checker
 from bot.services.ai_service import get_ai_service
 from bot.states.owner_states import OwnerForm
-from bot.utils.formatters import format_property_card
+from bot.utils.formatters import format_property_brief, format_property_card
 from bot.utils.validators import is_valid_phone, parse_int, parse_price
 
 logger = logging.getLogger(__name__)
@@ -382,18 +383,40 @@ async def confirm_save(
 ) -> None:
     data = await state.get_data()
 
-    # Проверка дублей по телефону и адресу
-    dup = await crud.find_duplicate(
-        session, phone=data.get("owner_phone"), address=data.get("address")
-    )
-    if dup:
-        await state.clear()
+    # Проверка дублей (телефон / адрес / район+комнаты+площадь+цена ±5%)
+    dups = await duplicate_checker.check_duplicates(session, data)
+    if dups:
+        brief = "\n".join("• " + format_property_brief(p) for p in dups)
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer(
-            f"⚠️ Похоже, такой объект уже добавлен (ID {dup.id}). Размещение отменено."
+            f"⚠️ <b>Возможный дубль!</b>\n\nПохож на:\n{brief}\n\nВсё равно добавить?",
+            reply_markup=owner_kb.dup_confirm_kb(),
         )
+        await _notify_admins_text(bot, "⚠️ Возможный дубль при добавлении объекта:\n" + brief)
         await callback.answer()
-        return
+        return  # остаёмся в OwnerForm.confirm, ждём решения
+
+    await _save_property(callback, state, session, bot)
+
+
+@router.callback_query(OwnerForm.confirm, F.data == f"{P}:dupyes")
+async def dup_yes(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _save_property(callback, state, session, bot)
+
+
+@router.callback_query(OwnerForm.confirm, F.data == f"{P}:dupno")
+async def dup_no(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Добавление отменено.")
+    await callback.answer()
+
+
+async def _save_property(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot
+) -> None:
+    data = await state.get_data()
 
     # Генерация краткого описания через ИИ (для карточки)
     description = await get_ai_service().generate_short_description(data)
@@ -466,6 +489,14 @@ def _build_preview(data: dict) -> Property:
         currency="сум",
         negotiable=bool(data.get("negotiable")),
     )
+
+
+async def _notify_admins_text(bot: Bot, text: str) -> None:
+    for admin_id in get_settings().admin_ids:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:  # noqa: BLE001
+            logger.debug("Не удалось уведомить админа %s", admin_id)
 
 
 async def _notify_admins(bot: Bot, prop: Property) -> None:
