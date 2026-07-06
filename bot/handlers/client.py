@@ -30,9 +30,10 @@ router = Router(name="client")
 # ---------------------------------------------------------------------------
 # Старт анкеты (вызывается из common-роутера по роли/меню)
 # ---------------------------------------------------------------------------
-async def begin_client_form(message: Message, state: FSMContext) -> None:
+async def begin_client_form(message: Message, state: FSMContext, *, full_name: str | None = None) -> None:
     await state.set_state(ClientForm.deal_type)
-    await state.update_data(name=message.from_user.full_name)
+    # full_name передаётся у реального пользователя (в callback message.from_user == бот)
+    await state.update_data(name=full_name or message.from_user.full_name)
     await message.answer(
         "Помогу подобрать недвижимость в Фергане.\n"
         "Вы хотите <b>арендовать</b> или <b>купить</b>?",

@@ -22,9 +22,10 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from bot.utils import timeutils
 
 
 class Base(DeclarativeBase):
@@ -129,7 +130,7 @@ class Property(Base):
     channel_post_id: Mapped[int | None] = mapped_column(Integer)
     last_bump: Mapped[dt.datetime | None] = mapped_column(DateTime())
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(), server_default=func.now()
+        DateTime(), default=timeutils.now
     )
 
     meetings: Mapped[list["Meeting"]] = relationship(
@@ -164,7 +165,7 @@ class Client(Base):
         Enum(ClientStatus), default=ClientStatus.new, index=True
     )
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(), server_default=func.now()
+        DateTime(), default=timeutils.now
     )
 
     meetings: Mapped[list["Meeting"]] = relationship(
@@ -209,5 +210,5 @@ class BotUser(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(), server_default=func.now()
+        DateTime(), default=timeutils.now
     )

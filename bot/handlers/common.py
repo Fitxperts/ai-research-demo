@@ -24,9 +24,14 @@ from bot.utils.formatters import PROPERTY_STATUS_LABELS, format_property_card
 
 router = Router(name="common")
 
+# Тексты кнопок меню — исключаются из catch-all first_touch
+_MENU_TEXTS = frozenset(
+    {"🔎 Подобрать жильё", "➕ Разместить объект", "📋 Мои объекты", "↩️ Сменить роль"}
+)
+
 
 # ---------------------------------------------------------------------------
-# Точки входа
+# Точка входа /start
 # ---------------------------------------------------------------------------
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
@@ -35,19 +40,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
     if not user.role_chosen:
         await message.answer("👋 Здравствуйте! Что вас интересует?", reply_markup=common_kb.role_choice_kb())
     else:
-        await _open_scenario(message, state, user.role)
-
-
-@router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
-async def first_touch(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    """Первое (или случайное вне сценария) сообщение — определяем роль."""
-    if get_settings().is_admin(message.from_user.id):
-        return
-    user = await _ensure_user(message, session)
-    if not user.role_chosen:
-        await message.answer("👋 Что вас интересует?", reply_markup=common_kb.role_choice_kb())
-    else:
-        await _open_menu(message, user.role)
+        await _open_scenario(message, state, user.role, message.from_user.full_name)
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +51,8 @@ async def choose_role(callback: CallbackQuery, state: FSMContext, session: Async
     role = UserRole(callback.data.split(":")[1])
     await crud.choose_role(session, callback.from_user.id, role)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _open_scenario(callback.message, state, role)
+    # ВАЖНО: имя берём у реального пользователя, а не у бота (callback.message.from_user == бот)
+    await _open_scenario(callback.message, state, role, callback.from_user.full_name)
     await callback.answer()
 
 
@@ -74,7 +68,7 @@ async def change_role(message: Message, state: FSMContext) -> None:
 @router.message(F.text == "🔎 Подобрать жильё")
 async def menu_client(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await begin_client_form(message, state)
+    await begin_client_form(message, state, full_name=message.from_user.full_name)
 
 
 @router.message(F.text == "➕ Разместить объект")
@@ -95,6 +89,21 @@ async def menu_my_objects(message: Message, session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Catch-all: первое (или случайное вне сценария) сообщение.
+# Регистрируется ПОСЛЕДНИМ и исключает тексты кнопок меню, иначе перехватывал бы их.
+# ---------------------------------------------------------------------------
+@router.message(StateFilter(None), F.text & ~F.text.startswith("/") & ~F.text.in_(_MENU_TEXTS))
+async def first_touch(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if get_settings().is_admin(message.from_user.id):
+        return
+    user = await _ensure_user(message, session)
+    if not user.role_chosen:
+        await message.answer("👋 Что вас интересует?", reply_markup=common_kb.role_choice_kb())
+    else:
+        await _open_menu(message, user.role)
+
+
+# ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 async def _ensure_user(message: Message, session: AsyncSession) -> BotUser:
@@ -107,13 +116,15 @@ async def _ensure_user(message: Message, session: AsyncSession) -> BotUser:
     )
 
 
-async def _open_scenario(message: Message, state: FSMContext, role: UserRole) -> None:
+async def _open_scenario(
+    message: Message, state: FSMContext, role: UserRole, full_name: str | None
+) -> None:
     if role == UserRole.owner:
         await message.answer("🏠 Режим собственника.", reply_markup=common_kb.owner_menu())
         await begin_property_form(message, state)
     else:
         await message.answer("🔎 Режим поиска жилья.", reply_markup=common_kb.client_menu())
-        await begin_client_form(message, state)
+        await begin_client_form(message, state, full_name=full_name)
 
 
 async def _open_menu(message: Message, role: UserRole) -> None:

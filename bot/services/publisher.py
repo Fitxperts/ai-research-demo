@@ -42,42 +42,76 @@ def _prop_to_dict(prop: Property) -> dict:
     }
 
 
-async def _send_post(bot: Bot, channel_id: str, text: str, photos: list[str]) -> int:
-    """Отправить пост (альбом/фото/текст) и вернуть id первого сообщения."""
-    if len(photos) > 1:
-        media = [
-            InputMediaPhoto(
-                media=fid,
-                caption=text if i == 0 else None,
-                parse_mode=ParseMode.MARKDOWN_V2 if i == 0 else None,
-            )
-            for i, fid in enumerate(photos)
-        ]
-        messages = await bot.send_media_group(channel_id, media)
-        return messages[0].message_id
-    if len(photos) == 1:
-        message = await bot.send_photo(
-            channel_id, photos[0], caption=text, parse_mode=ParseMode.MARKDOWN_V2
+CAPTION_LIMIT = 1024  # лимит подписи к фото в Telegram
+MAX_ALBUM = 10        # лимит фото в одной медиагруппе
+
+
+def _caption_post(photos: list[str], text: str) -> bool:
+    """Публикуется ли объект как фото-с-подписью (иначе — отдельным текстом)."""
+    return bool(photos) and len(text) <= CAPTION_LIMIT
+
+
+async def _send_album(bot: Bot, channel_id: str, photos: list[str], caption: str | None) -> None:
+    media = [
+        InputMediaPhoto(
+            media=fid,
+            caption=caption if (i == 0 and caption) else None,
+            parse_mode=ParseMode.MARKDOWN_V2 if (i == 0 and caption) else None,
         )
+        for i, fid in enumerate(photos[:MAX_ALBUM])
+    ]
+    await bot.send_media_group(channel_id, media)
+
+
+async def _send_post(bot: Bot, channel_id: str, text: str, photos: list[str]) -> int:
+    """Отправить пост и вернуть id сообщения, несущего описание (для будущих правок).
+
+    - фото + короткий текст → подпись к фото/альбому (id = первое фото);
+    - фото + длинный текст (>1024) → альбом без подписи + отдельное текстовое
+      сообщение (id = текстовое сообщение);
+    - без фото → текстовое сообщение.
+    """
+    if photos and len(text) <= CAPTION_LIMIT:
+        if len(photos) > 1:
+            media = [
+                InputMediaPhoto(
+                    media=fid,
+                    caption=text if i == 0 else None,
+                    parse_mode=ParseMode.MARKDOWN_V2 if i == 0 else None,
+                )
+                for i, fid in enumerate(photos[:MAX_ALBUM])
+            ]
+            messages = await bot.send_media_group(channel_id, media)
+            return messages[0].message_id
+        message = await bot.send_photo(channel_id, photos[0], caption=text, parse_mode=ParseMode.MARKDOWN_V2)
         return message.message_id
+
+    if photos:  # длинный текст — альбом без подписи + отдельное текстовое сообщение
+        await _send_album(bot, channel_id, photos, caption=None)
+
     message = await bot.send_message(channel_id, text, parse_mode=ParseMode.MARKDOWN_V2)
     return message.message_id
 
 
-async def _edit_post(bot: Bot, channel_id: str, message_id: int, text: str, has_photo: bool) -> None:
-    try:
-        if has_photo:
-            await bot.edit_message_caption(
-                chat_id=channel_id, message_id=message_id, caption=text,
-                parse_mode=ParseMode.MARKDOWN_V2,
-            )
-        else:
-            await bot.edit_message_text(
-                text, chat_id=channel_id, message_id=message_id,
-                parse_mode=ParseMode.MARKDOWN_V2,
-            )
-    except Exception:  # noqa: BLE001 - пост могли удалить/изменить вручную
-        logger.debug("Не удалось отредактировать пост %s", message_id)
+async def _edit_post(bot: Bot, channel_id: str, message_id: int, text: str, is_caption: bool) -> None:
+    async def _try_caption() -> None:
+        await bot.edit_message_caption(
+            chat_id=channel_id, message_id=message_id, caption=text, parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+    async def _try_text() -> None:
+        await bot.edit_message_text(
+            text, chat_id=channel_id, message_id=message_id, parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+    order = (_try_caption, _try_text) if is_caption else (_try_text, _try_caption)
+    for attempt in order:
+        try:
+            await attempt()
+            return
+        except Exception:  # noqa: BLE001 - пробуем альтернативный способ / пост изменён вручную
+            continue
+    logger.debug("Не удалось отредактировать пост %s", message_id)
 
 
 async def publish_property(bot: Bot, session: AsyncSession, property_id: str) -> Property | None:
@@ -109,9 +143,11 @@ async def mark_as_rented(bot: Bot, session: AsyncSession, property_id: str) -> P
         prop.status, label = PropertyStatus.rented, "СДАНО"
 
     if prop.channel_post_id:
-        text = f"⛔ *{label}*\n\n" + get_ai_service().generate_description(_prop_to_dict(prop))
+        base = get_ai_service().generate_description(_prop_to_dict(prop))
+        text = f"⛔ *{label}*\n\n" + base
         await _edit_post(
-            bot, get_settings().channel_id, prop.channel_post_id, text, bool(prop.photo_list)
+            bot, get_settings().channel_id, prop.channel_post_id, text,
+            is_caption=_caption_post(prop.photo_list, base),
         )
 
     await session.commit()
@@ -131,7 +167,10 @@ async def bump_property(bot: Bot, session: AsyncSession, property_id: str) -> Pr
     # Помечаем старый пост как неактуальный (архив)
     if prop.channel_post_id:
         archived_text = "🗄 *Эълон янгиланди \\(пастга қаранг\\)*\n\n" + text
-        await _edit_post(bot, channel_id, prop.channel_post_id, archived_text, bool(prop.photo_list))
+        await _edit_post(
+            bot, channel_id, prop.channel_post_id, archived_text,
+            is_caption=_caption_post(prop.photo_list, text),
+        )
 
     # Публикуем свежий пост
     post_id = await _send_post(bot, channel_id, text, prop.photo_list)

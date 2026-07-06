@@ -1,6 +1,7 @@
 """Хендлеры собственника: размещение объекта недвижимости (FSM)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import Bot, F, Router
@@ -29,6 +30,10 @@ from bot.utils.validators import is_valid_phone, parse_int, parse_price
 logger = logging.getLogger(__name__)
 router = Router(name="owner")
 P = owner_kb.PREFIX
+
+# Сериализация записи фото в FSM: фото альбома приходят как конкурентные апдейты,
+# без блокировки read-modify-write состояния теряет часть фотографий.
+_photo_lock = asyncio.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -234,24 +239,18 @@ _BOOL_FLOW = {
 
 async def _bool_cb(callback: CallbackQuery, state: FSMContext) -> None:
     current = await state.get_state()
-    field, nxt = _resolve_bool(current)
-    value = callback.data.split(":")[2] == "yes"
-    await state.update_data(**{field: value})
+    pair = next((p for st, p in _BOOL_FLOW.items() if st.state == current), None)
+    if pair is None:
+        await callback.answer()
+        return
+    field, nxt = pair
+    await state.update_data(**{field: callback.data.split(":")[2] == "yes"})
     await callback.message.edit_reply_markup(reply_markup=None)
     if nxt is None:
         await _ask_price(callback.message, state)
     else:
         await nxt(callback.message, state)
     await callback.answer()
-
-
-def _resolve_bool(current: str):
-    for st, pair in _BOOL_FLOW.items():
-        if st.state == current:
-            return pair
-    if current == OwnerForm.negotiable.state:
-        return ("negotiable", "phone")
-    return ("furniture", None)
 
 
 # ---------------------------------------------------------------------------
@@ -307,14 +306,18 @@ async def _ask_photos(message: Message, state: FSMContext) -> None:
 
 @router.message(OwnerForm.photos, F.photo)
 async def collect_photo(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    photos: list[str] = data.get("photos", [])
-    photos.append(message.photo[-1].file_id)
-    await state.update_data(photos=photos)
-    # Одно подтверждение на альбом: реагируем только на первое фото группы
-    if not message.media_group_id or data.get("_mg") != message.media_group_id:
-        await state.update_data(_mg=message.media_group_id)
-        await message.answer(f"Фото принято ({len(photos)}). Ещё или «Готово».", reply_markup=owner_kb.photos_done_kb())
+    async with _photo_lock:
+        data = await state.get_data()
+        photos: list[str] = data.get("photos", [])
+        photos.append(message.photo[-1].file_id)
+        # Одно подтверждение на альбом: реагируем только на первое фото группы
+        notify = not message.media_group_id or data.get("_mg") != message.media_group_id
+        await state.update_data(photos=photos, _mg=message.media_group_id)
+    if notify:
+        await message.answer(
+            f"Фото принято ({len(photos)}). Ещё или «Готово».",
+            reply_markup=owner_kb.photos_done_kb(),
+        )
 
 
 @router.callback_query(OwnerForm.photos, F.data == f"{P}:pdone")

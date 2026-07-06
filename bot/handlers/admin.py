@@ -107,7 +107,12 @@ async def _show_property(target: Message, prop: Property, kb) -> None:
 @router.callback_query(F.data.startswith(f"{P}:approve:"))
 async def approve(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
     property_id = callback.data.split(":")[2]
-    prop = await publisher.publish_property(bot, session, property_id)
+    try:
+        prop = await publisher.publish_property(bot, session, property_id)
+    except Exception:  # noqa: BLE001 - ошибка отправки в канал не должна «вешать» callback
+        logger.exception("Ошибка публикации объекта %s", property_id)
+        await callback.answer("Ошибка публикации. Проверьте канал/права бота.", show_alert=True)
+        return
     if prop is None:
         await callback.answer("Объект не найден", show_alert=True)
         return

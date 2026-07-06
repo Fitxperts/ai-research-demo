@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.utils import timeutils
@@ -95,16 +96,26 @@ async def _next_id(session: AsyncSession, model, prefix: str, *, start: int = 1,
     return f"{prefix}_{max_n + 1:0{pad}d}"
 
 
+async def _insert_with_id(session, model, prefix, fields, *, start, pad, attempts=5):
+    """Создать запись со сгенерированным строковым ID, с ретраем на гонке ID."""
+    for _ in range(attempts):
+        obj = model(id=await _next_id(session, model, prefix, start=start, pad=pad), **fields)
+        session.add(obj)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            continue
+        await session.refresh(obj)
+        return obj
+    raise RuntimeError(f"Не удалось выделить идентификатор {prefix} после {attempts} попыток")
+
+
 # ---------------------------------------------------------------------------
 # Клиенты
 # ---------------------------------------------------------------------------
 async def create_client(session: AsyncSession, **fields) -> Client:
-    client_id = await _next_id(session, Client, "CLT", start=1, pad=3)
-    client = Client(id=client_id, **fields)
-    session.add(client)
-    await session.commit()
-    await session.refresh(client)
-    return client
+    return await _insert_with_id(session, Client, "CLT", fields, start=1, pad=3)
 
 
 # ---------------------------------------------------------------------------
@@ -112,12 +123,9 @@ async def create_client(session: AsyncSession, **fields) -> Client:
 # ---------------------------------------------------------------------------
 async def create_property(session: AsyncSession, *, property_kind: PropertyKind, **fields) -> Property:
     prefix = _KIND_PREFIX.get(property_kind, "APT")
-    prop_id = await _next_id(session, Property, prefix, start=1001, pad=4)
-    prop = Property(id=prop_id, property_kind=property_kind, **fields)
-    session.add(prop)
-    await session.commit()
-    await session.refresh(prop)
-    return prop
+    return await _insert_with_id(
+        session, Property, prefix, {"property_kind": property_kind, **fields}, start=1001, pad=4
+    )
 
 
 async def get_property(session: AsyncSession, property_id: str) -> Property | None:
@@ -222,12 +230,11 @@ async def set_client_status(
 async def create_meeting(
     session: AsyncSession, *, client_id: str, property_id: str, when: dt.datetime
 ) -> Meeting:
-    meeting_id = await _next_id(session, Meeting, "MTG", start=1, pad=3)
-    meeting = Meeting(id=meeting_id, client_id=client_id, property_id=property_id, datetime=when)
-    session.add(meeting)
-    await session.commit()
-    await session.refresh(meeting)
-    return meeting
+    return await _insert_with_id(
+        session, Meeting, "MTG",
+        {"client_id": client_id, "property_id": property_id, "datetime": when},
+        start=1, pad=3,
+    )
 
 
 async def upcoming_meetings(session: AsyncSession, *, limit: int = 20) -> list[Meeting]:
