@@ -16,8 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import get_settings
 from bot.database import crud
 from bot.database.models import Property, PropertyStatus, PropertyType
+from bot.services import matcher
 from bot.services.ai_service import get_ai_service
 from bot.utils import timeutils
+from bot.utils.formatters import format_property_card
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +135,30 @@ async def publish_property(bot: Bot, session: AsyncSession, property_id: str) ->
     prop.last_bump = timeutils.now()
     await session.commit()
     logger.info("Объект %s опубликован (post=%s)", prop.id, post_id)
+
+    await _notify_matching_clients(bot, session, prop)
     return prop
+
+
+async def _notify_matching_clients(bot: Bot, session: AsyncSession, prop: Property) -> None:
+    """Оповестить клиентов с подходящими активными заявками о новом объекте."""
+    clients = await matcher.clients_for_property(session, prop)
+    if not clients:
+        return
+    text = "🔔 Появился объект по вашему запросу:\n\n" + format_property_card(prop)
+    photos = prop.photo_list
+    sent = 0
+    for client in clients:
+        try:
+            if photos:
+                await bot.send_photo(client.telegram_id, photos[0], caption=text)
+            else:
+                await bot.send_message(client.telegram_id, text)
+            sent += 1
+        except Exception:  # noqa: BLE001 - клиент мог заблокировать бота
+            logger.debug("Не удалось уведомить клиента %s", client.telegram_id)
+    if sent:
+        logger.info("Объект %s: уведомлено клиентов %d", prop.id, sent)
 
 
 async def mark_as_rented(bot: Bot, session: AsyncSession, property_id: str) -> Property | None:
