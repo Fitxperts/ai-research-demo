@@ -6,6 +6,8 @@ import datetime as dt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.utils import timeutils
+
 from bot.database.models import (
     BotUser,
     Client,
@@ -105,13 +107,6 @@ async def create_client(session: AsyncSession, **fields) -> Client:
     return client
 
 
-async def has_client(session: AsyncSession, telegram_id: int) -> bool:
-    count = await session.scalar(
-        select(func.count()).select_from(Client).where(Client.telegram_id == telegram_id)
-    )
-    return bool(count)
-
-
 # ---------------------------------------------------------------------------
 # Объекты недвижимости
 # ---------------------------------------------------------------------------
@@ -127,19 +122,6 @@ async def create_property(session: AsyncSession, *, property_kind: PropertyKind,
 
 async def get_property(session: AsyncSession, property_id: str) -> Property | None:
     return await session.get(Property, property_id)
-
-
-async def find_duplicate(
-    session: AsyncSession, *, phone: str | None, address: str | None
-) -> Property | None:
-    """Найти дубль по телефону собственника и адресу."""
-    if not phone or not address:
-        return None
-    return await session.scalar(
-        select(Property)
-        .where(Property.owner_phone == phone, Property.address.ilike(f"%{address}%"))
-        .limit(1)
-    )
 
 
 async def set_property_status(
@@ -237,7 +219,7 @@ async def create_meeting(
 
 
 async def upcoming_meetings(session: AsyncSession, *, limit: int = 20) -> list[Meeting]:
-    today = dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = timeutils.now().replace(hour=0, minute=0, second=0, microsecond=0)
     stmt = (
         select(Meeting)
         .where(Meeting.datetime >= today, Meeting.status == MeetingStatus.planned)
@@ -249,7 +231,7 @@ async def upcoming_meetings(session: AsyncSession, *, limit: int = 20) -> list[M
 
 async def meetings_needing_reminder(session: AsyncSession) -> list[Meeting]:
     """Запланированные будущие встречи (для напоминаний)."""
-    now = dt.datetime.now()
+    now = timeutils.now()
     stmt = select(Meeting).where(
         Meeting.status == MeetingStatus.planned, Meeting.datetime >= now
     )
@@ -262,7 +244,7 @@ async def meetings_for_reminder(
     """Запланированные встречи, наступающие до `before`, по которым ещё не
     отправляли напоминание вида `flag` (reminded_1d/2h/30m)."""
     column = getattr(Meeting, flag)
-    now = dt.datetime.now()
+    now = timeutils.now()
     stmt = select(Meeting).where(
         Meeting.status == MeetingStatus.planned,
         Meeting.datetime > now,

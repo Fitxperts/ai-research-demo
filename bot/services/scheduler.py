@@ -19,6 +19,7 @@ from bot.database import crud
 from bot.database.models import Client
 from bot.database.session import get_sessionmaker
 from bot.services import publisher
+from bot.utils import timeutils
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Задача 1. Автоподнятие
 # ---------------------------------------------------------------------------
 async def auto_bump(bot: Bot) -> None:
-    threshold = dt.datetime.now() - dt.timedelta(days=BUMP_INTERVAL_DAYS)
+    threshold = timeutils.now() - dt.timedelta(days=BUMP_INTERVAL_DAYS)
     async with get_sessionmaker()() as session:
         due = await crud.properties_due_for_bump(session, threshold)
         bumped = 0
@@ -46,7 +47,7 @@ async def auto_bump(bot: Bot) -> None:
 # Задачи 2-4. Напоминания о встречах
 # ---------------------------------------------------------------------------
 async def remind(bot: Bot, within: dt.timedelta, flag: str, human: str) -> None:
-    before = dt.datetime.now() + within
+    before = timeutils.now() + within
     async with get_sessionmaker()() as session:
         meetings = await crud.meetings_for_reminder(session, before=before, flag=flag)
         for meeting in meetings:

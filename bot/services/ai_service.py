@@ -72,9 +72,17 @@ class AIService:
     # ------------------------------------------------------------------
     # 1. Готовое объявление (строгий формат, MarkdownV2)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _emoji(base: str, key: str) -> str:
+        """Премиум-эмодзи, если задан реальный ID, иначе обычный эмодзи."""
+        eid = PREMIUM_EMOJI.get(key)
+        if eid and eid not in ("0", ""):
+            return f"![{base}](tg://emoji?id={eid})"
+        return base
+
     def generate_description(self, property_data: dict) -> str:
         d = property_data
-        e = PREMIUM_EMOJI
+        em = self._emoji
         deal = d.get("deal_type") or d.get("type")
         kind_uz = _KIND_UZ.get(d.get("property_kind"), "КВАРТИРА")
         title_deal = "ИЖАРАГА БЕРИЛАДИ" if deal == "rent" else "СОТИЛАДИ"
@@ -82,39 +90,39 @@ class AIService:
         rooms = d.get("rooms")
 
         lines: list[str] = []
-        lines.append(f"![🏢](tg://emoji?id={e['building']}) *{kind_uz} {title_deal}*")
+        lines.append(f"{em('🏢', 'building')} *{kind_uz} {title_deal}*")
 
         tags = f"{tag_deal} \\#Фарғона"
         if rooms:
             tags += f" \\#{rooms}\\_хона"
         if d.get("urgent"):
-            tags += f" ![🚨](tg://emoji?id={e['siren']}) \\#Срочно"
+            tags += f" {em('🚨', 'siren')} \\#Срочно"
         lines.append(tags)
         lines.append("")
 
         address = escape_md(d.get("address") or "—")
-        lines.append(f"![📍](tg://emoji?id={e['pin']}) *Манзил:* {address}\\.")
+        lines.append(f"{em('📍', 'pin')} *Манзил:* {address}\\.")
         lines.append("")
 
         if rooms:
             floor, floors = d.get("floor"), d.get("floors")
             fl = f" \\({floor}/{floors} қават\\)" if floor and floors else ""
-            lines.append(f"![🚪](tg://emoji?id={e['door']}) *Хоналар сони:* {rooms} хона{fl}\\.")
+            lines.append(f"{em('🚪', 'door')} *Хоналар сони:* {rooms} хона{fl}\\.")
 
         reno = escape_md(d.get("renovation") or "Аъло даражада, тоза ва шинам")
-        lines.append(f"![🛠](tg://emoji?id={e['tools']}) *Ҳолати:* {reno}\\.")
+        lines.append(f"{em('🛠', 'tools')} *Ҳолати:* {reno}\\.")
 
         comforts = self._comforts(d)
-        lines.append(f"![⚡️](tg://emoji?id={e['lightning']}) *Қулайликлари:* {comforts}\\.")
+        lines.append(f"{em('⚡️', 'lightning')} *Қулайликлари:* {comforts}\\.")
         lines.append("")
 
         price = escape_md(_fmt_price(d.get("price")))
         neg = " \\(келишилади\\)" if d.get("negotiable") else ""
-        lines.append(f"![💰](tg://emoji?id={e['money']}) *Нархи:* {price} сўм{neg}\\.")
+        lines.append(f"{em('💰', 'money')} *Нархи:* {price} сўм{neg}\\.")
         lines.append("_\\*Риэлторлик хизмати алоҳида\\._")
         lines.append("")
 
-        lines.append(f"![📞](tg://emoji?id={e['phone']}) *Мурожаат учун \\(босиб кўринг\\):*")
+        lines.append(f"{em('📞', 'phone')} *Мурожаат учун \\(босиб кўринг\\):*")
         contacts = "\n".join(
             f"☎️ {escape_md(phone)} \\| @{escape_md(username)}"
             for phone, username in AGENCY_CONTACTS

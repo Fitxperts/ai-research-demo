@@ -429,6 +429,7 @@ async def _save_property(
         status=PropertyStatus.pending,
         owner_name=callback.from_user.full_name,
         owner_phone=data.get("owner_phone"),
+        owner_telegram_id=callback.from_user.id,
         district=data.get("district"),
         address=data.get("address"),
         rooms=data.get("rooms"),

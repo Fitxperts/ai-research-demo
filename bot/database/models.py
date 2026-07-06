@@ -97,6 +97,7 @@ class Property(Base):
 
     owner_name: Mapped[str | None] = mapped_column(String(255))
     owner_phone: Mapped[str | None] = mapped_column(String(32))
+    owner_telegram_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
 
     district: Mapped[str | None] = mapped_column(String(128), index=True)
     address: Mapped[str | None] = mapped_column(String(255))

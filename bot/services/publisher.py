@@ -17,6 +17,7 @@ from bot.config import get_settings
 from bot.database import crud
 from bot.database.models import Property, PropertyStatus, PropertyType
 from bot.services.ai_service import get_ai_service
+from bot.utils import timeutils
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ async def publish_property(bot: Bot, session: AsyncSession, property_id: str) ->
 
     prop.channel_post_id = post_id
     prop.status = PropertyStatus.active
-    prop.last_bump = dt.datetime.now()
+    prop.last_bump = timeutils.now()
     await session.commit()
     logger.info("Объект %s опубликован (post=%s)", prop.id, post_id)
     return prop
@@ -135,7 +136,7 @@ async def bump_property(bot: Bot, session: AsyncSession, property_id: str) -> Pr
     # Публикуем свежий пост
     post_id = await _send_post(bot, channel_id, text, prop.photo_list)
     prop.channel_post_id = post_id
-    prop.last_bump = dt.datetime.now()
+    prop.last_bump = timeutils.now()
     await session.commit()
     logger.info("Объект %s поднят (новый post=%s)", prop.id, post_id)
     return prop

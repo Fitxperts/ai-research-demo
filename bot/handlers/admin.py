@@ -27,6 +27,7 @@ from bot.utils.formatters import (
     format_meeting,
     format_property_card,
 )
+from bot.utils import timeutils
 from bot.utils.validators import parse_int, parse_price
 
 logger = logging.getLogger(__name__)
@@ -298,7 +299,7 @@ async def meeting_time(message: Message, state: FSMContext, session: AsyncSessio
         await message.answer("Не понял время. Формат ЧЧ:ММ, например 15:30.")
         return
     data = await state.get_data()
-    when = dt.datetime.combine(dt.date.fromisoformat(data["date"]), time)
+    when = timeutils.localize(dt.datetime.combine(dt.date.fromisoformat(data["date"]), time))
     meeting = await crud.create_meeting(
         session, client_id=data["client_id"], property_id=data["property_id"], when=when
     )
@@ -336,7 +337,7 @@ async def statistics(message: Message, session: AsyncSession) -> None:
     prop_stats = await crud.count_properties_by_status(session)
     client_stats = await crud.count_clients_by_status(session)
 
-    threshold = dt.datetime.now() - dt.timedelta(days=BUMP_INTERVAL_DAYS)
+    threshold = timeutils.now() - dt.timedelta(days=BUMP_INTERVAL_DAYS)
     due = await crud.properties_due_for_bump(session, threshold)
 
     total = sum(prop_stats.values())
@@ -373,6 +374,9 @@ async def _clear_markup(callback: CallbackQuery) -> None:
 
 
 async def _notify_owner(bot: Bot, prop: Property, text: str) -> None:
-    # Телефон/имя есть, но telegram_id собственника не хранится напрямую;
-    # уведомление владельцу отправляется, если он сам инициировал (будущее развитие).
-    logger.info("Owner notify (%s): %s", prop.id, text)
+    if not prop.owner_telegram_id:
+        return
+    try:
+        await bot.send_message(prop.owner_telegram_id, text)
+    except Exception:  # noqa: BLE001 - собственник мог заблокировать бота
+        logger.debug("Не удалось уведомить собственника %s", prop.owner_telegram_id)
