@@ -8,6 +8,8 @@ dist/
 .env
 *.log
 
+media/
+
 .venv/
 venv/
 env/

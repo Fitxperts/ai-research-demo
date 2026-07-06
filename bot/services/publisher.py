@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 async def publish_listing(bot: Bot, session: AsyncSession, listing: Listing) -> None:
     """Опубликовать объявление в канал и сохранить id сообщения."""
-    channel_id = get_settings().publish_channel_id
+    channel_id = get_settings().channel_id
     caption = format_listing(listing)
     photos = listing.photos
 
@@ -35,7 +35,7 @@ async def publish_listing(bot: Bot, session: AsyncSession, listing: Listing) -> 
 
 async def bump_listing(bot: Bot, session: AsyncSession, listing: Listing) -> None:
     """Поднять объявление: повторно опубликовать и обновить bumped_at."""
-    channel_id = get_settings().publish_channel_id
+    channel_id = get_settings().channel_id
 
     # Удаляем предыдущее сообщение, если оно было.
     if listing.channel_message_id:

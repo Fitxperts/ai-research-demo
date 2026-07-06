@@ -1,58 +1,35 @@
-"""Конфигурация приложения, загружаемая из переменных окружения."""
+"""Конфигурация приложения, загружаемая из переменных окружения (.env)."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+class Settings:
+    def __init__(self) -> None:
+        # Telegram
+        self.bot_token: str = os.environ["BOT_TOKEN"]
+        self.channel_id: str = os.getenv("CHANNEL_ID", "")
+        self.admin_ids: list[int] = self._parse_admin_ids(os.getenv("ADMIN_TELEGRAM_ID", ""))
 
-    # Telegram
-    bot_token: str = Field(alias="BOT_TOKEN")
-    publish_channel_id: int = Field(alias="PUBLISH_CHANNEL_ID")
-    admin_ids: list[int] = Field(default_factory=list, alias="ADMIN_IDS")
+        # Инфраструктура
+        self.database_url: str = os.environ["DATABASE_URL"]
+        self.redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
-    # PostgreSQL
-    postgres_user: str = Field(alias="POSTGRES_USER")
-    postgres_password: str = Field(alias="POSTGRES_PASSWORD")
-    postgres_db: str = Field(alias="POSTGRES_DB")
-    postgres_host: str = Field("db", alias="POSTGRES_HOST")
-    postgres_port: int = Field(5432, alias="POSTGRES_PORT")
+        # Anthropic
+        self.anthropic_api_key: str = os.environ["ANTHROPIC_API_KEY"]
+        self.ai_model: str = os.getenv("AI_MODEL", "claude-opus-4-8")
 
-    # Redis
-    redis_host: str = Field("redis", alias="REDIS_HOST")
-    redis_port: int = Field(6379, alias="REDIS_PORT")
-    redis_db: int = Field(0, alias="REDIS_DB")
+        # Планировщик
+        self.bump_interval_hours: int = int(os.getenv("BUMP_INTERVAL_HOURS", "24"))
 
-    # Anthropic
-    anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
-    ai_model: str = Field("claude-opus-4-8", alias="AI_MODEL")
-
-    # Планировщик
-    bump_interval_hours: int = Field(24, alias="BUMP_INTERVAL_HOURS")
-
-    @field_validator("admin_ids", mode="before")
-    @classmethod
-    def _parse_admin_ids(cls, value: object) -> list[int]:
-        if isinstance(value, str):
-            return [int(x) for x in value.replace(" ", "").split(",") if x]
-        if isinstance(value, (list, tuple)):
-            return [int(x) for x in value]
-        return []
-
-    @property
-    def database_url(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
-
-    @property
-    def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+    @staticmethod
+    def _parse_admin_ids(raw: str) -> list[int]:
+        return [int(x) for x in raw.replace(" ", "").split(",") if x.isdigit()]
 
     def is_admin(self, telegram_id: int) -> bool:
         return telegram_id in self.admin_ids
@@ -60,4 +37,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
