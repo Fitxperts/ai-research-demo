@@ -145,6 +145,23 @@ def meetings_menu_kb() -> InlineKeyboardMarkup:
     )
 
 
+def meeting_actions_kb(meeting_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Провёл", callback_data=f"{PREFIX}:mdone:{meeting_id}"),
+                InlineKeyboardButton(text="❌ Отменить", callback_data=f"{PREFIX}:mcancel:{meeting_id}"),
+            ]
+        ]
+    )
+
+
+def more_kb(callback_data: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬇️ Ещё", callback_data=callback_data)]]
+    )
+
+
 def pick_clients_kb(clients: list[Client]) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"{c.id} · {c.name or '—'}", callback_data=f"{PREFIX}:mclient:{c.id}")]

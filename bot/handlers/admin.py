@@ -14,6 +14,7 @@ from bot.config import BUMP_INTERVAL_DAYS, get_settings
 from bot.database import crud
 from bot.database.models import (
     ClientStatus,
+    MeetingStatus,
     Property,
     PropertyStatus,
 )
@@ -81,16 +82,25 @@ async def objects_menu(message: Message) -> None:
     await message.answer("📋 Объекты — выберите фильтр:", reply_markup=admin_kb.object_filters_kb())
 
 
+PAGE = 5  # объектов/клиентов на страницу
+
+
 @router.callback_query(F.data.startswith(f"{P}:objs:"))
 async def objects_list(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
-    key = callback.data.split(":")[2]
-    props = await crud.list_properties(session, statuses=_STATUS_FILTER.get(key))
+    parts = callback.data.split(":")
+    key = parts[2]
+    offset = int(parts[3]) if len(parts) > 3 else 0
+    props = await crud.list_properties(session, statuses=_STATUS_FILTER.get(key), limit=PAGE, offset=offset)
     await callback.answer()
     if not props:
-        await callback.message.answer("Ничего не найдено.")
+        await callback.message.answer("Больше объектов нет." if offset else "Ничего не найдено.")
         return
     for prop in props:
         await _show_property(callback.message, prop, admin_kb.object_actions_kb(prop))
+    if len(props) == PAGE:
+        await callback.message.answer(
+            "…", reply_markup=admin_kb.more_kb(f"{P}:objs:{key}:{offset + PAGE}")
+        )
 
 
 async def _show_property(target: Message, prop: Property, kb) -> None:
@@ -203,12 +213,24 @@ async def edit_value(message: Message, state: FSMContext, session: AsyncSession)
 # ---------------------------------------------------------------------------
 @router.message(F.text == "👥 Клиенты")
 async def clients_list(message: Message, session: AsyncSession) -> None:
-    clients = await crud.list_clients(session)
+    await _show_clients_page(message, session, offset=0)
+
+
+@router.callback_query(F.data.startswith(f"{P}:cli:"))
+async def clients_more(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    await _show_clients_page(callback.message, session, offset=int(callback.data.split(":")[2]))
+
+
+async def _show_clients_page(target: Message, session: AsyncSession, *, offset: int) -> None:
+    clients = await crud.list_clients(session, limit=PAGE, offset=offset)
     if not clients:
-        await message.answer("Заявок пока нет.")
+        await target.answer("Больше заявок нет." if offset else "Заявок пока нет.")
         return
     for client in clients:
-        await message.answer(format_client_short(client), reply_markup=admin_kb.client_actions_kb(client))
+        await target.answer(format_client_short(client), reply_markup=admin_kb.client_actions_kb(client))
+    if len(clients) == PAGE:
+        await target.answer("…", reply_markup=admin_kb.more_kb(f"{P}:cli:{offset + PAGE}"))
 
 
 @router.callback_query(F.data.startswith(f"{P}:cstatus:"))
@@ -245,10 +267,26 @@ async def meetings_list(message: Message, session: AsyncSession) -> None:
     meetings = await crud.upcoming_meetings(session)
     if meetings:
         for meeting in meetings:
-            await message.answer(format_meeting(meeting))
+            await message.answer(format_meeting(meeting), reply_markup=admin_kb.meeting_actions_kb(meeting.id))
     else:
         await message.answer("Запланированных встреч нет.")
     await message.answer("Управление встречами:", reply_markup=admin_kb.meetings_menu_kb())
+
+
+@router.callback_query(F.data.startswith(f"{P}:mdone:"))
+async def meeting_done(callback: CallbackQuery, session: AsyncSession) -> None:
+    meeting = await crud.set_meeting_status(session, callback.data.split(":")[2], MeetingStatus.done)
+    if meeting:
+        await crud.set_client_status(session, meeting.client_id, ClientStatus.showing_done)
+        await _clear_markup(callback)
+    await callback.answer("Встреча проведена ✅", show_alert=True)
+
+
+@router.callback_query(F.data.startswith(f"{P}:mcancel:"))
+async def meeting_cancel(callback: CallbackQuery, session: AsyncSession) -> None:
+    await crud.set_meeting_status(session, callback.data.split(":")[2], MeetingStatus.cancelled)
+    await _clear_markup(callback)
+    await callback.answer("Встреча отменена ❌", show_alert=True)
 
 
 @router.callback_query(F.data == f"{P}:meet_new")

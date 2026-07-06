@@ -172,11 +172,12 @@ async def list_properties(
     *,
     statuses: list[PropertyStatus] | None = None,
     limit: int = 15,
+    offset: int = 0,
 ) -> list[Property]:
     stmt = select(Property)
     if statuses:
         stmt = stmt.where(Property.status.in_(statuses))
-    stmt = stmt.order_by(Property.created_at.desc()).limit(limit)
+    stmt = stmt.order_by(Property.created_at.desc()).offset(offset).limit(limit)
     return list(await session.scalars(stmt))
 
 
@@ -203,8 +204,8 @@ async def properties_due_for_bump(session: AsyncSession, older_than: dt.datetime
 # ---------------------------------------------------------------------------
 # Клиенты (CRM)
 # ---------------------------------------------------------------------------
-async def list_clients(session: AsyncSession, *, limit: int = 20) -> list[Client]:
-    stmt = select(Client).order_by(Client.created_at.desc()).limit(limit)
+async def list_clients(session: AsyncSession, *, limit: int = 20, offset: int = 0) -> list[Client]:
+    stmt = select(Client).order_by(Client.created_at.desc()).offset(offset).limit(limit)
     return list(await session.scalars(stmt))
 
 
@@ -235,6 +236,18 @@ async def create_meeting(
         {"client_id": client_id, "property_id": property_id, "datetime": when},
         start=1, pad=3,
     )
+
+
+async def set_meeting_status(
+    session: AsyncSession, meeting_id: str, status: MeetingStatus
+) -> Meeting | None:
+    meeting = await session.get(Meeting, meeting_id)
+    if meeting is None:
+        return None
+    meeting.status = status
+    await session.commit()
+    await session.refresh(meeting)
+    return meeting
 
 
 async def upcoming_meetings(session: AsyncSession, *, limit: int = 20) -> list[Meeting]:
