@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -29,41 +28,16 @@ router = Router(name="client")
 
 
 # ---------------------------------------------------------------------------
-# Точки входа: определение роли и старт анкеты
+# Старт анкеты (вызывается из common-роутера по роли/меню)
 # ---------------------------------------------------------------------------
-async def _start_form(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    settings = get_settings()
-    user = await crud.get_or_create_user(
-        session,
-        message.from_user.id,
-        username=message.from_user.username,
-        full_name=message.from_user.full_name,
-        is_admin=settings.is_admin(message.from_user.id),
-    )
-    await state.clear()
-    await state.update_data(name=user.full_name)
+async def begin_client_form(message: Message, state: FSMContext) -> None:
     await state.set_state(ClientForm.deal_type)
+    await state.update_data(name=message.from_user.full_name)
     await message.answer(
-        "👋 Здравствуйте! Помогу подобрать недвижимость в Фергане.\n\n"
+        "Помогу подобрать недвижимость в Фергане.\n"
         "Вы хотите <b>арендовать</b> или <b>купить</b>?",
         reply_markup=client_kb.deal_type_kb(),
     )
-
-
-@router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    await _start_form(message, state, session)
-
-
-@router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
-async def any_text(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    """Пользователь пишет что-либо → определяем роль и запускаем анкету."""
-    if get_settings().is_admin(message.from_user.id):
-        return  # админ обрабатывается в своём роутере (следующие шаги)
-    if await crud.has_client(session, message.from_user.id):
-        await message.answer("Чтобы оставить новую заявку, нажмите /start")
-        return
-    await _start_form(message, state, session)
 
 
 # ---------------------------------------------------------------------------

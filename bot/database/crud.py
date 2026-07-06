@@ -46,6 +46,7 @@ async def get_or_create_user(
             username=username,
             full_name=full_name,
             role=UserRole.admin if is_admin else UserRole.client,
+            role_chosen=is_admin,
         )
         session.add(user)
         await session.commit()
@@ -57,10 +58,19 @@ async def get_or_create_user(
     if full_name and user.full_name != full_name:
         user.full_name, changed = full_name, True
     if is_admin and user.role != UserRole.admin:
-        user.role, changed = UserRole.admin, True
+        user.role, user.role_chosen, changed = UserRole.admin, True, True
     if changed:
         await session.commit()
     return user
+
+
+async def choose_role(session: AsyncSession, telegram_id: int, role: UserRole) -> None:
+    """Сохранить явно выбранную пользователем роль."""
+    user = await session.get(BotUser, telegram_id)
+    if user:
+        user.role = role
+        user.role_chosen = True
+        await session.commit()
 
 
 async def set_user_role(session: AsyncSession, telegram_id: int, role: UserRole) -> None:
