@@ -208,6 +208,14 @@ async def list_clients(session: AsyncSession, *, limit: int = 20, offset: int = 
     return list(await session.scalars(stmt))
 
 
+async def all_properties(session: AsyncSession) -> list[Property]:
+    return list(await session.scalars(select(Property).order_by(Property.created_at.desc())))
+
+
+async def all_clients(session: AsyncSession) -> list[Client]:
+    return list(await session.scalars(select(Client).order_by(Client.created_at.desc())))
+
+
 async def get_client(session: AsyncSession, client_id: str) -> Client | None:
     return await session.get(Client, client_id)
 

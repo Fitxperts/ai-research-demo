@@ -7,7 +7,7 @@ import logging
 from aiogram import Bot, F, Router
 from aiogram.filters import BaseFilter, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import BUMP_INTERVAL_DAYS, get_settings
@@ -20,7 +20,7 @@ from bot.database.models import (
 )
 from bot.handlers.owner import begin_property_form
 from bot.keyboards import admin_kb
-from bot.services import matcher, publisher
+from bot.services import export, matcher, publisher
 from bot.states.admin_states import EditProperty, ScheduleMeeting
 from bot.utils import timeutils
 from bot.utils.formatters import (
@@ -403,7 +403,18 @@ async def statistics(message: Message, session: AsyncSession) -> None:
         "",
         f"📢 Нужно поднять сегодня: {len(due)}",
     ]
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), reply_markup=admin_kb.export_kb())
+
+
+@router.callback_query(F.data.startswith(f"{P}:export:"))
+async def export_data(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, what, fmt = callback.data.split(":")
+    if what == "props":
+        data, filename = await export.export_properties(session, fmt)
+    else:
+        data, filename = await export.export_clients(session, fmt)
+    await callback.message.answer_document(BufferedInputFile(data, filename=filename))
+    await callback.answer("Готово ✅")
 
 
 # ---------------------------------------------------------------------------

@@ -162,6 +162,21 @@ def more_kb(callback_data: str) -> InlineKeyboardMarkup:
     )
 
 
+def export_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📄 Объекты Excel", callback_data=f"{PREFIX}:export:props:xlsx"),
+                InlineKeyboardButton(text="📄 Объекты CSV", callback_data=f"{PREFIX}:export:props:csv"),
+            ],
+            [
+                InlineKeyboardButton(text="👥 Клиенты Excel", callback_data=f"{PREFIX}:export:clients:xlsx"),
+                InlineKeyboardButton(text="👥 Клиенты CSV", callback_data=f"{PREFIX}:export:clients:csv"),
+            ],
+        ]
+    )
+
+
 def pick_clients_kb(clients: list[Client]) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"{c.id} · {c.name or '—'}", callback_data=f"{PREFIX}:mclient:{c.id}")]

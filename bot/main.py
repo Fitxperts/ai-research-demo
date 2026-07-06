@@ -12,6 +12,7 @@ from aiogram.types import BotCommand, ErrorEvent
 
 from bot.config import get_settings
 from bot.handlers import register_routers
+from bot.logging_setup import init_sentry, setup_logging
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.services.scheduler import setup_scheduler
@@ -23,10 +24,7 @@ _COMMANDS = [
     BotCommand(command="help", description="Помощь"),
 ]
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +43,8 @@ def _register_error_handler(dp: Dispatcher, bot: Bot, settings) -> None:
 
 async def main() -> None:
     settings = get_settings()
+
+    init_sentry()
 
     # Схема БД применяется миграциями Alembic (alembic upgrade head) до старта бота.
 
