@@ -1,17 +1,25 @@
-"""SQLAlchemy-модели предметной области РиелторБота."""
+"""SQLAlchemy-модели РиелторБота.
+
+Четыре таблицы:
+- properties  — объекты недвижимости (PK вида ``APT_1001``)
+- clients     — заявки клиентов (PK вида ``CLT_001``)
+- meetings    — встречи и просмотры
+- bot_users   — пользователи бота
+"""
 from __future__ import annotations
 
+import datetime as dt
 import enum
-from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
-    Numeric,
     String,
     Text,
     func,
@@ -23,105 +31,174 @@ class Base(DeclarativeBase):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Перечисления
+# ---------------------------------------------------------------------------
+class PropertyType(str, enum.Enum):
+    rent = "rent"
+    sale = "sale"
+
+
+class PropertyStatus(str, enum.Enum):
+    pending = "pending"
+    active = "active"
+    rented = "rented"
+    sold = "sold"
+    archived = "archived"
+
+
+class PropertyKind(str, enum.Enum):
+    apartment = "apartment"
+    house = "house"
+    land = "land"
+    commercial = "commercial"
+
+
+class ClientDealType(str, enum.Enum):
+    rent = "rent"
+    buy = "buy"
+
+
+class ClientStatus(str, enum.Enum):
+    new = "new"
+    contacted = "contacted"
+    showing_set = "showing_set"
+    showing_done = "showing_done"
+    deal = "deal"
+    closed = "closed"
+
+
+class MeetingStatus(str, enum.Enum):
+    planned = "planned"
+    done = "done"
+    cancelled = "cancelled"
+
+
 class UserRole(str, enum.Enum):
     client = "client"
     owner = "owner"
     admin = "admin"
 
 
-class PropertyType(str, enum.Enum):
-    apartment = "apartment"  # квартира
-    house = "house"  # дом
-    room = "room"  # комната
-    commercial = "commercial"  # коммерческая
+# ---------------------------------------------------------------------------
+# Таблицы
+# ---------------------------------------------------------------------------
+class Property(Base):
+    """Объект недвижимости."""
 
+    __tablename__ = "properties"
 
-class DealType(str, enum.Enum):
-    sale = "sale"  # продажа
-    rent = "rent"  # аренда
+    id: Mapped[str] = mapped_column(String(20), primary_key=True)  # APT_1001
+    type: Mapped[PropertyType] = mapped_column(Enum(PropertyType))
+    status: Mapped[PropertyStatus] = mapped_column(
+        Enum(PropertyStatus), default=PropertyStatus.pending, index=True
+    )
+    property_kind: Mapped[PropertyKind] = mapped_column(Enum(PropertyKind))
 
+    owner_name: Mapped[str | None] = mapped_column(String(255))
+    owner_phone: Mapped[str | None] = mapped_column(String(32))
 
-class ListingStatus(str, enum.Enum):
-    draft = "draft"  # черновик
-    pending = "pending"  # на модерации
-    published = "published"  # опубликовано
-    rejected = "rejected"  # отклонено
-    archived = "archived"  # снято/архив
-
-
-class User(Base):
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
-    username: Mapped[str | None] = mapped_column(String(64))
-    full_name: Mapped[str | None] = mapped_column(String(255))
-    phone: Mapped[str | None] = mapped_column(String(32))
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.client)
-    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    listings: Mapped[list["Listing"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
-    requests: Mapped[list["ClientRequest"]] = relationship(back_populates="client", cascade="all, delete-orphan")
-
-
-class Listing(Base):
-    """Объявление о недвижимости, размещённое собственником."""
-
-    __tablename__ = "listings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-
-    title: Mapped[str] = mapped_column(String(255))
-    description: Mapped[str] = mapped_column(Text, default="")
-    property_type: Mapped[PropertyType] = mapped_column(Enum(PropertyType))
-    deal_type: Mapped[DealType] = mapped_column(Enum(DealType))
-    price: Mapped[float] = mapped_column(Numeric(12, 2))
-    rooms: Mapped[int | None] = mapped_column(Integer)
-    area: Mapped[float | None] = mapped_column(Numeric(8, 2))
     district: Mapped[str | None] = mapped_column(String(128), index=True)
     address: Mapped[str | None] = mapped_column(String(255))
-    photo_file_ids: Mapped[str | None] = mapped_column(Text)  # список file_id через запятую
 
-    status: Mapped[ListingStatus] = mapped_column(Enum(ListingStatus), default=ListingStatus.draft, index=True)
-    reject_reason: Mapped[str | None] = mapped_column(String(255))
-    channel_message_id: Mapped[int | None] = mapped_column(BigInteger)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    bumped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    auto_bump: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    owner: Mapped["User"] = relationship(back_populates="listings")
-
-    @property
-    def photos(self) -> list[str]:
-        if not self.photo_file_ids:
-            return []
-        return [p for p in self.photo_file_ids.split(",") if p]
-
-    def set_photos(self, file_ids: list[str]) -> None:
-        self.photo_file_ids = ",".join(file_ids)
-
-
-class ClientRequest(Base):
-    """Заявка на подбор недвижимости от клиента."""
-
-    __tablename__ = "client_requests"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-
-    deal_type: Mapped[DealType] = mapped_column(Enum(DealType))
-    property_type: Mapped[PropertyType | None] = mapped_column(Enum(PropertyType))
-    district: Mapped[str | None] = mapped_column(String(128))
-    budget_min: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    budget_max: Mapped[float | None] = mapped_column(Numeric(12, 2))
     rooms: Mapped[int | None] = mapped_column(Integer)
-    comment: Mapped[str | None] = mapped_column(Text)
+    area: Mapped[float | None] = mapped_column(Float)
+    floor: Mapped[int | None] = mapped_column(Integer)
+    floors: Mapped[int | None] = mapped_column(Integer)
+    renovation: Mapped[str | None] = mapped_column(String(128))
 
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    furniture: Mapped[bool] = mapped_column(Boolean, default=False)
+    appliances: Mapped[bool] = mapped_column(Boolean, default=False)
+    gas: Mapped[bool] = mapped_column(Boolean, default=False)
+    water: Mapped[bool] = mapped_column(Boolean, default=False)
+    electricity: Mapped[bool] = mapped_column(Boolean, default=False)
+    internet: Mapped[bool] = mapped_column(Boolean, default=False)
+    docs: Mapped[bool] = mapped_column(Boolean, default=False)
+    mortgage: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    client: Mapped["User"] = relationship(back_populates="requests")
+    price: Mapped[float | None] = mapped_column(Float)
+    currency: Mapped[str | None] = mapped_column(String(8), default="₽")
+    negotiable: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    description: Mapped[str | None] = mapped_column(Text)
+
+    channel_post_id: Mapped[int | None] = mapped_column(Integer)
+    last_bump: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    meetings: Mapped[list["Meeting"]] = relationship(
+        back_populates="property", cascade="all, delete-orphan"
+    )
+
+
+class Client(Base):
+    """Заявка клиента на подбор недвижимости."""
+
+    __tablename__ = "clients"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True)  # CLT_001
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+
+    name: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(32))
+
+    deal_type: Mapped[ClientDealType] = mapped_column(Enum(ClientDealType))
+    district: Mapped[str | None] = mapped_column(String(128))
+    rooms: Mapped[int | None] = mapped_column(Integer)
+    budget: Mapped[float | None] = mapped_column(Float)
+    currency: Mapped[str | None] = mapped_column(String(8), default="₽")
+    residents: Mapped[str | None] = mapped_column(String(128))
+    move_date: Mapped[dt.date | None] = mapped_column(Date)
+
+    status: Mapped[ClientStatus] = mapped_column(
+        Enum(ClientStatus), default=ClientStatus.new, index=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    meetings: Mapped[list["Meeting"]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+
+
+class Meeting(Base):
+    """Встреча / просмотр объекта клиентом."""
+
+    __tablename__ = "meetings"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), index=True
+    )
+    property_id: Mapped[str] = mapped_column(
+        ForeignKey("properties.id", ondelete="CASCADE"), index=True
+    )
+
+    datetime: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[MeetingStatus] = mapped_column(
+        Enum(MeetingStatus), default=MeetingStatus.planned, index=True
+    )
+
+    reminded_1d: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminded_2h: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminded_30m: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    client: Mapped["Client"] = relationship(back_populates="meetings")
+    property: Mapped["Property"] = relationship(back_populates="meetings")
+
+
+class BotUser(Base):
+    """Пользователь Telegram-бота."""
+
+    __tablename__ = "bot_users"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.client)
+    username: Mapped[str | None] = mapped_column(String(64))
+    full_name: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
