@@ -105,11 +105,11 @@ async def _show_property(target: Message, prop: Property, kb) -> None:
 # --- действия с объектом ---
 @router.callback_query(F.data.startswith(f"{P}:approve:"))
 async def approve(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
-    prop = await crud.get_property(session, callback.data.split(":")[2])
+    property_id = callback.data.split(":")[2]
+    prop = await publisher.publish_property(bot, session, property_id)
     if prop is None:
         await callback.answer("Объект не найден", show_alert=True)
         return
-    await publisher.publish_property(bot, session, prop)
     await _clear_markup(callback)
     await callback.answer("Опубликовано ✅", show_alert=True)
     await _notify_owner(bot, prop, f"✅ Ваш объект {prop.id} опубликован!")
@@ -124,18 +124,14 @@ async def hold(callback: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data.startswith(f"{P}:sold:"))
 async def sold(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
-    prop = await crud.get_property(session, callback.data.split(":")[2])
-    if prop:
-        await publisher.mark_sold(bot, session, prop)
-        await _clear_markup(callback)
+    await publisher.mark_as_rented(bot, session, callback.data.split(":")[2])
+    await _clear_markup(callback)
     await callback.answer("Отмечено как сдано/продано ⛔", show_alert=True)
 
 
 @router.callback_query(F.data.startswith(f"{P}:bump:"))
 async def bump(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
-    prop = await crud.get_property(session, callback.data.split(":")[2])
-    if prop:
-        await publisher.bump_property(bot, session, prop)
+    await publisher.bump_property(bot, session, callback.data.split(":")[2])
     await callback.answer("Поднято 📢", show_alert=True)
 
 
