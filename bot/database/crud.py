@@ -246,6 +246,22 @@ async def meetings_needing_reminder(session: AsyncSession) -> list[Meeting]:
     return list(await session.scalars(stmt))
 
 
+async def meetings_for_reminder(
+    session: AsyncSession, *, before: dt.datetime, flag: str
+) -> list[Meeting]:
+    """Запланированные встречи, наступающие до `before`, по которым ещё не
+    отправляли напоминание вида `flag` (reminded_1d/2h/30m)."""
+    column = getattr(Meeting, flag)
+    now = dt.datetime.now()
+    stmt = select(Meeting).where(
+        Meeting.status == MeetingStatus.planned,
+        Meeting.datetime > now,
+        Meeting.datetime <= before,
+        column.is_(False),
+    )
+    return list(await session.scalars(stmt))
+
+
 # ---------------------------------------------------------------------------
 # Статистика
 # ---------------------------------------------------------------------------

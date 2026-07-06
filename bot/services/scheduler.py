@@ -1,25 +1,118 @@
 """Планировщик фоновых задач (APScheduler).
 
-Заглушка Шага 3: создаётся планировщик с нужным часовым поясом. Конкретные
-задачи (автоподнятие объявлений, напоминания о встречах) добавляются на
-последующих шагах.
+Четыре задачи:
+- автоподнятие активных объектов (ежедневно 10:00);
+- напоминание о встрече за день (ежечасно);
+- напоминание за 2 часа (каждые 15 минут);
+- напоминание за 30 минут (каждые 5 минут).
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from bot.config import TIMEZONE
+from bot.config import BUMP_INTERVAL_DAYS, TIMEZONE, get_settings
+from bot.database import crud
+from bot.database.models import Client
+from bot.database.session import get_sessionmaker
+from bot.services import publisher
 
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Задача 1. Автоподнятие
+# ---------------------------------------------------------------------------
+async def auto_bump(bot: Bot) -> None:
+    threshold = dt.datetime.now() - dt.timedelta(days=BUMP_INTERVAL_DAYS)
+    async with get_sessionmaker()() as session:
+        due = await crud.properties_due_for_bump(session, threshold)
+        bumped = 0
+        for prop in due:
+            try:
+                await publisher.bump_property(bot, session, prop.id)
+                bumped += 1
+            except Exception:  # noqa: BLE001
+                logger.exception("Не удалось поднять объект %s", prop.id)
+    if bumped:
+        await _report_admins(bot, f"📢 Автоподнятие: поднято {bumped} объявлений.")
+    logger.info("Автоподнятие: обработано %d", bumped)
+
+
+# ---------------------------------------------------------------------------
+# Задачи 2-4. Напоминания о встречах
+# ---------------------------------------------------------------------------
+async def remind(bot: Bot, within: dt.timedelta, flag: str, human: str) -> None:
+    before = dt.datetime.now() + within
+    async with get_sessionmaker()() as session:
+        meetings = await crud.meetings_for_reminder(session, before=before, flag=flag)
+        for meeting in meetings:
+            client = await session.get(Client, meeting.client_id)
+            prop = await crud.get_property(session, meeting.property_id)
+            when = meeting.datetime.strftime("%d.%m %H:%M")
+            address = (prop.address if prop else None) or meeting.property_id
+
+            # Клиенту
+            if client:
+                try:
+                    await bot.send_message(
+                        client.telegram_id,
+                        f"⏰ Напоминание: {human} у вас показ объекта "
+                        f"{meeting.property_id} ({address}) в {when}.",
+                    )
+                except Exception:  # noqa: BLE001 - клиент мог заблокировать бота
+                    logger.debug("Не удалось напомнить клиенту %s", meeting.client_id)
+
+            # Админам
+            info = f"{client.name or '—'} ({client.phone or '—'})" if client else "—"
+            await _report_admins(
+                bot,
+                f"⏰ Напоминание ({human}): встреча {meeting.id}\n"
+                f"Клиент: {info}\nОбъект: {meeting.property_id} · {address}\nКогда: {when}",
+            )
+
+            setattr(meeting, flag, True)
+        await session.commit()
+    if meetings:
+        logger.info("Напоминания '%s': отправлено %d", flag, len(meetings))
+
+
+# ---------------------------------------------------------------------------
+# Утилиты и настройка
+# ---------------------------------------------------------------------------
+async def _report_admins(bot: Bot, text: str) -> None:
+    for admin_id in get_settings().admin_ids:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:  # noqa: BLE001
+            logger.debug("Не удалось отправить отчёт админу %s", admin_id)
+
+
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
-    # Задачи будут зарегистрированы на следующих шагах:
-    #   - автоподнятие объявлений (раз в BUMP_INTERVAL_DAYS)
-    #   - напоминания о встречах (за 1 день / 2 часа / 30 минут)
-    logger.info("Планировщик инициализирован (TZ=%s)", TIMEZONE)
+
+    scheduler.add_job(
+        auto_bump, trigger="cron", hour=10, minute=0, args=[bot],
+        id="auto_bump", replace_existing=True,
+    )
+    scheduler.add_job(
+        remind, trigger="interval", hours=1,
+        args=[bot, dt.timedelta(days=1), "reminded_1d", "завтра"],
+        id="remind_1d", replace_existing=True,
+    )
+    scheduler.add_job(
+        remind, trigger="interval", minutes=15,
+        args=[bot, dt.timedelta(hours=2), "reminded_2h", "через ~2 часа"],
+        id="remind_2h", replace_existing=True,
+    )
+    scheduler.add_job(
+        remind, trigger="interval", minutes=5,
+        args=[bot, dt.timedelta(minutes=30), "reminded_30m", "через 30 минут"],
+        id="remind_30m", replace_existing=True,
+    )
+
+    logger.info("Планировщик настроен: 4 задачи (TZ=%s)", TIMEZONE)
     return scheduler
