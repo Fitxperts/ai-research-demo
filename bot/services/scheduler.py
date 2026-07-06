@@ -46,10 +46,13 @@ async def auto_bump(bot: Bot) -> None:
 # ---------------------------------------------------------------------------
 # Задачи 2-4. Напоминания о встречах
 # ---------------------------------------------------------------------------
-async def remind(bot: Bot, within: dt.timedelta, flag: str, human: str) -> None:
-    before = timeutils.now() + within
+async def remind(
+    bot: Bot, lower: dt.timedelta, upper: dt.timedelta, flag: str, human: str
+) -> None:
+    now = timeutils.now()
+    after, before = now + lower, now + upper
     async with get_sessionmaker()() as session:
-        meetings = await crud.meetings_for_reminder(session, before=before, flag=flag)
+        meetings = await crud.meetings_for_reminder(session, after=after, before=before, flag=flag)
         for meeting in meetings:
             client = await session.get(Client, meeting.client_id)
             prop = await crud.get_property(session, meeting.property_id)
@@ -99,19 +102,20 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         auto_bump, trigger="cron", hour=10, minute=0, args=[bot],
         id="auto_bump", replace_existing=True,
     )
+    # Непересекающиеся окна: за день (2ч..24ч), за 2 часа (30м..2ч), за 30 минут (0..30м)
     scheduler.add_job(
         remind, trigger="interval", hours=1,
-        args=[bot, dt.timedelta(days=1), "reminded_1d", "завтра"],
+        args=[bot, dt.timedelta(hours=2), dt.timedelta(days=1), "reminded_1d", "завтра"],
         id="remind_1d", replace_existing=True,
     )
     scheduler.add_job(
         remind, trigger="interval", minutes=15,
-        args=[bot, dt.timedelta(hours=2), "reminded_2h", "через ~2 часа"],
+        args=[bot, dt.timedelta(minutes=30), dt.timedelta(hours=2), "reminded_2h", "через ~2 часа"],
         id="remind_2h", replace_existing=True,
     )
     scheduler.add_job(
         remind, trigger="interval", minutes=5,
-        args=[bot, dt.timedelta(minutes=30), "reminded_30m", "через 30 минут"],
+        args=[bot, dt.timedelta(0), dt.timedelta(minutes=30), "reminded_30m", "через 30 минут"],
         id="remind_30m", replace_existing=True,
     )
 

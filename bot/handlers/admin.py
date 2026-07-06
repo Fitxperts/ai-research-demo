@@ -299,7 +299,7 @@ async def meeting_time(message: Message, state: FSMContext, session: AsyncSessio
         await message.answer("Не понял время. Формат ЧЧ:ММ, например 15:30.")
         return
     data = await state.get_data()
-    when = timeutils.localize(dt.datetime.combine(dt.date.fromisoformat(data["date"]), time))
+    when = dt.datetime.combine(dt.date.fromisoformat(data["date"]), time)
     meeting = await crud.create_meeting(
         session, client_id=data["client_id"], property_id=data["property_id"], when=when
     )

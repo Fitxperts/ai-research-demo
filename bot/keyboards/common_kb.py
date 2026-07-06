@@ -31,7 +31,7 @@ def client_menu() -> ReplyKeyboardMarkup:
 def owner_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Разместить объект")],
+            [KeyboardButton(text="➕ Разместить объект"), KeyboardButton(text="📋 Мои объекты")],
             [KeyboardButton(text="↩️ Сменить роль")],
         ],
         resize_keyboard=True,

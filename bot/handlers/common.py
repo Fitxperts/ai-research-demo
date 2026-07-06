@@ -20,6 +20,7 @@ from bot.database.models import BotUser, UserRole
 from bot.handlers.client import begin_client_form
 from bot.handlers.owner import begin_property_form
 from bot.keyboards import common_kb
+from bot.utils.formatters import PROPERTY_STATUS_LABELS, format_property_card
 
 router = Router(name="common")
 
@@ -80,6 +81,17 @@ async def menu_client(message: Message, state: FSMContext) -> None:
 async def menu_owner(message: Message, state: FSMContext) -> None:
     await state.clear()
     await begin_property_form(message, state)
+
+
+@router.message(F.text == "📋 Мои объекты")
+async def menu_my_objects(message: Message, session: AsyncSession) -> None:
+    props = await crud.list_owner_properties(session, message.from_user.id)
+    if not props:
+        await message.answer("У вас пока нет размещённых объектов.")
+        return
+    for prop in props:
+        status = PROPERTY_STATUS_LABELS.get(prop.status, prop.status.value)
+        await message.answer(f"[{status}] " + format_property_card(prop))
 
 
 # ---------------------------------------------------------------------------

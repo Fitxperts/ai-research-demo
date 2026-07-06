@@ -127,9 +127,9 @@ class Property(Base):
     video: Mapped[str | None] = mapped_column(String(255))  # file_id видео
 
     channel_post_id: Mapped[int | None] = mapped_column(Integer)
-    last_bump: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    last_bump: Mapped[dt.datetime | None] = mapped_column(DateTime())
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(), server_default=func.now()
     )
 
     meetings: Mapped[list["Meeting"]] = relationship(
@@ -164,7 +164,7 @@ class Client(Base):
         Enum(ClientStatus), default=ClientStatus.new, index=True
     )
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(), server_default=func.now()
     )
 
     meetings: Mapped[list["Meeting"]] = relationship(
@@ -185,7 +185,7 @@ class Meeting(Base):
         ForeignKey("properties.id", ondelete="CASCADE"), index=True
     )
 
-    datetime: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    datetime: Mapped[dt.datetime] = mapped_column(DateTime(), index=True)
     status: Mapped[MeetingStatus] = mapped_column(
         Enum(MeetingStatus), default=MeetingStatus.planned, index=True
     )
@@ -209,5 +209,5 @@ class BotUser(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(), server_default=func.now()
     )

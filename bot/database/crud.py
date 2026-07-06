@@ -172,6 +172,18 @@ async def list_properties(
     return list(await session.scalars(stmt))
 
 
+async def list_owner_properties(
+    session: AsyncSession, telegram_id: int, *, limit: int = 20
+) -> list[Property]:
+    stmt = (
+        select(Property)
+        .where(Property.owner_telegram_id == telegram_id)
+        .order_by(Property.created_at.desc())
+        .limit(limit)
+    )
+    return list(await session.scalars(stmt))
+
+
 async def properties_due_for_bump(session: AsyncSession, older_than: dt.datetime) -> list[Property]:
     stmt = select(Property).where(
         Property.status == PropertyStatus.active,
@@ -229,25 +241,16 @@ async def upcoming_meetings(session: AsyncSession, *, limit: int = 20) -> list[M
     return list(await session.scalars(stmt))
 
 
-async def meetings_needing_reminder(session: AsyncSession) -> list[Meeting]:
-    """Запланированные будущие встречи (для напоминаний)."""
-    now = timeutils.now()
-    stmt = select(Meeting).where(
-        Meeting.status == MeetingStatus.planned, Meeting.datetime >= now
-    )
-    return list(await session.scalars(stmt))
-
-
 async def meetings_for_reminder(
-    session: AsyncSession, *, before: dt.datetime, flag: str
+    session: AsyncSession, *, after: dt.datetime, before: dt.datetime, flag: str
 ) -> list[Meeting]:
-    """Запланированные встречи, наступающие до `before`, по которым ещё не
-    отправляли напоминание вида `flag` (reminded_1d/2h/30m)."""
+    """Запланированные встречи в интервале (after, before], по которым ещё не
+    отправляли напоминание вида `flag` (reminded_1d/2h/30m). Непересекающиеся
+    интервалы у разных задач исключают дублирование напоминаний."""
     column = getattr(Meeting, flag)
-    now = timeutils.now()
     stmt = select(Meeting).where(
         Meeting.status == MeetingStatus.planned,
-        Meeting.datetime > now,
+        Meeting.datetime > after,
         Meeting.datetime <= before,
         column.is_(False),
     )
