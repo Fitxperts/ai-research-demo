@@ -6,12 +6,36 @@ from html import escape
 from bot.database.models import (
     Client,
     ClientDealType,
+    ClientStatus,
+    Meeting,
+    MeetingStatus,
     Property,
     PropertyKind,
+    PropertyStatus,
     PropertyType,
 )
 
 CLIENT_DEAL_LABELS = {ClientDealType.rent: "Аренда", ClientDealType.buy: "Покупка"}
+CLIENT_STATUS_LABELS = {
+    ClientStatus.new: "Новый",
+    ClientStatus.contacted: "Связались",
+    ClientStatus.showing_set: "Показ назначен",
+    ClientStatus.showing_done: "Показ проведён",
+    ClientStatus.deal: "Сделка",
+    ClientStatus.closed: "Закрыт",
+}
+PROPERTY_STATUS_LABELS = {
+    PropertyStatus.pending: "На проверке",
+    PropertyStatus.active: "Активно",
+    PropertyStatus.rented: "Сдано",
+    PropertyStatus.sold: "Продано",
+    PropertyStatus.archived: "Архив",
+}
+MEETING_STATUS_LABELS = {
+    MeetingStatus.planned: "Запланирована",
+    MeetingStatus.done: "Проведена",
+    MeetingStatus.cancelled: "Отменена",
+}
 PROPERTY_TYPE_LABELS = {PropertyType.rent: "Аренда", PropertyType.sale: "Продажа"}
 KIND_LABELS = {
     PropertyKind.apartment: "Квартира",
@@ -77,6 +101,26 @@ def format_property_card(prop: Property) -> str:
         lines.append("")
         lines.append(escape(prop.description))
     return "\n".join(lines)
+
+
+def format_client_short(client: Client) -> str:
+    deal = CLIENT_DEAL_LABELS.get(client.deal_type, client.deal_type.value)
+    status = CLIENT_STATUS_LABELS.get(client.status, client.status.value)
+    parts = [f"<b>{escape(client.id)}</b> · {escape(client.name or '—')}"]
+    parts.append(f"{deal} · {escape(client.district or 'любой район')}")
+    parts.append(f"Бюджет: {format_money(client.budget, client.currency)}")
+    parts.append(f"📞 {escape(client.phone or '—')} · Статус: <b>{status}</b>")
+    return "\n".join(parts)
+
+
+def format_meeting(meeting: Meeting) -> str:
+    when = meeting.datetime.strftime("%d.%m.%Y %H:%M") if meeting.datetime else "—"
+    status = MEETING_STATUS_LABELS.get(meeting.status, meeting.status.value)
+    return (
+        f"📆 <b>{escape(meeting.id)}</b> — {when}\n"
+        f"Клиент: {escape(meeting.client_id)} · Объект: {escape(meeting.property_id)}\n"
+        f"Статус: {status}"
+    )
 
 
 def _communications(prop: Property) -> list[str]:

@@ -1,12 +1,17 @@
 """Функции доступа к данным (CRUD) для моделей РиелторБота."""
 from __future__ import annotations
 
+import datetime as dt
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import (
     BotUser,
     Client,
+    ClientStatus,
+    Meeting,
+    MeetingStatus,
     Property,
     PropertyKind,
     PropertyStatus,
@@ -160,3 +165,99 @@ async def search_properties(
     stmt = stmt.order_by(Property.last_bump.desc().nullslast(), Property.created_at.desc()).limit(limit)
     result = await session.scalars(stmt)
     return list(result)
+
+
+async def list_properties(
+    session: AsyncSession,
+    *,
+    statuses: list[PropertyStatus] | None = None,
+    limit: int = 15,
+) -> list[Property]:
+    stmt = select(Property)
+    if statuses:
+        stmt = stmt.where(Property.status.in_(statuses))
+    stmt = stmt.order_by(Property.created_at.desc()).limit(limit)
+    return list(await session.scalars(stmt))
+
+
+async def properties_due_for_bump(session: AsyncSession, older_than: dt.datetime) -> list[Property]:
+    stmt = select(Property).where(
+        Property.status == PropertyStatus.active,
+        (Property.last_bump.is_(None)) | (Property.last_bump < older_than),
+    )
+    return list(await session.scalars(stmt))
+
+
+# ---------------------------------------------------------------------------
+# Клиенты (CRM)
+# ---------------------------------------------------------------------------
+async def list_clients(session: AsyncSession, *, limit: int = 20) -> list[Client]:
+    stmt = select(Client).order_by(Client.created_at.desc()).limit(limit)
+    return list(await session.scalars(stmt))
+
+
+async def get_client(session: AsyncSession, client_id: str) -> Client | None:
+    return await session.get(Client, client_id)
+
+
+async def set_client_status(
+    session: AsyncSession, client_id: str, status: ClientStatus
+) -> Client | None:
+    client = await session.get(Client, client_id)
+    if client is None:
+        return None
+    client.status = status
+    await session.commit()
+    await session.refresh(client)
+    return client
+
+
+# ---------------------------------------------------------------------------
+# Встречи
+# ---------------------------------------------------------------------------
+async def create_meeting(
+    session: AsyncSession, *, client_id: str, property_id: str, when: dt.datetime
+) -> Meeting:
+    meeting_id = await _next_id(session, Meeting, "MTG", start=1, pad=3)
+    meeting = Meeting(id=meeting_id, client_id=client_id, property_id=property_id, datetime=when)
+    session.add(meeting)
+    await session.commit()
+    await session.refresh(meeting)
+    return meeting
+
+
+async def upcoming_meetings(session: AsyncSession, *, limit: int = 20) -> list[Meeting]:
+    today = dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    stmt = (
+        select(Meeting)
+        .where(Meeting.datetime >= today, Meeting.status == MeetingStatus.planned)
+        .order_by(Meeting.datetime)
+        .limit(limit)
+    )
+    return list(await session.scalars(stmt))
+
+
+async def meetings_needing_reminder(session: AsyncSession) -> list[Meeting]:
+    """Запланированные будущие встречи (для напоминаний)."""
+    now = dt.datetime.now()
+    stmt = select(Meeting).where(
+        Meeting.status == MeetingStatus.planned, Meeting.datetime >= now
+    )
+    return list(await session.scalars(stmt))
+
+
+# ---------------------------------------------------------------------------
+# Статистика
+# ---------------------------------------------------------------------------
+async def count_properties_by_status(session: AsyncSession) -> dict[str, int]:
+    rows = await session.execute(
+        select(Property.status, func.count()).group_by(Property.status)
+    )
+    return {status.value: count for status, count in rows}
+
+
+async def count_clients_by_status(session: AsyncSession) -> dict[str, int]:
+    rows = await session.execute(
+        select(Client.status, func.count()).group_by(Client.status)
+    )
+    return {status.value: count for status, count in rows}

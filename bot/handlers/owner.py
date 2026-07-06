@@ -33,6 +33,13 @@ P = owner_kb.PREFIX
 # ---------------------------------------------------------------------------
 # Вход
 # ---------------------------------------------------------------------------
+async def begin_property_form(message: Message, state: FSMContext) -> None:
+    """Начать анкету размещения объекта (используется и админом)."""
+    await state.clear()
+    await state.set_state(OwnerForm.deal_type)
+    await message.answer("🏠 Разместим объект. Тип сделки?", reply_markup=owner_kb.deal_type_kb())
+
+
 @router.message(Command("add"))
 async def cmd_add(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await crud.get_or_create_user(
@@ -44,9 +51,7 @@ async def cmd_add(message: Message, state: FSMContext, session: AsyncSession) ->
     )
     if not get_settings().is_admin(message.from_user.id):
         await crud.set_user_role(session, message.from_user.id, UserRole.owner)
-    await state.clear()
-    await state.set_state(OwnerForm.deal_type)
-    await message.answer("🏠 Разместим объект. Тип сделки?", reply_markup=owner_kb.deal_type_kb())
+    await begin_property_form(message, state)
 
 
 # ---------------------------------------------------------------------------
