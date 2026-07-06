@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,28 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
         await message.answer("👋 Здравствуйте! Что вас интересует?", reply_markup=common_kb.role_choice_kb())
     else:
         await _open_scenario(message, state, user.role, message.from_user.full_name)
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    current = await state.get_state()
+    await state.clear()
+    if current is None:
+        await message.answer("Нет активного действия.")
+    else:
+        await message.answer("✖️ Действие отменено. /start — в меню.")
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    await message.answer(
+        "ℹ️ <b>РиелторБот</b>\n\n"
+        "• /start — начать / выбрать роль\n"
+        "• /add — разместить объект (для собственника)\n"
+        "• /cancel — отменить текущее действие\n\n"
+        "Клиент: оставьте заявку — подберём варианты и сообщим о новых.\n"
+        "Собственник: разместите объект по шагам или одним сообщением."
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -300,8 +301,8 @@ async def pick_slot(callback: CallbackQuery, bot: Bot) -> None:
     await callback.message.edit_text(f"✅ Отлично! Риелтор позвонит вам в {slot}.")
     await callback.answer()
 
-    who = callback.from_user.full_name
-    username = f" (@{callback.from_user.username})" if callback.from_user.username else ""
+    who = escape(callback.from_user.full_name or "")
+    username = f" (@{escape(callback.from_user.username)})" if callback.from_user.username else ""
     await _notify_admins(bot, f"📞 Клиент {who}{username} просит звонок в <b>{slot}</b>.")
 
 
@@ -309,18 +310,21 @@ async def pick_slot(callback: CallbackQuery, bot: Bot) -> None:
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 def _preview_card(data: dict) -> str:
+    def esc(value) -> str:
+        return escape(str(value)) if value not in (None, "") else "—"
+
     deal = {"rent": "Аренда", "buy": "Покупка"}.get(data.get("deal_type"), "—")
     budget = data.get("budget")
     budget_str = f"{int(budget):,}".replace(",", " ") + " сум" if budget else "—"
     lines = [
         "<b>Ваша заявка</b>",
         f"Сделка: {deal}",
-        f"Район: {data.get('district') or '—'}",
+        f"Район: {esc(data.get('district'))}",
         f"Бюджет: {budget_str}",
-        f"Комнат: {data.get('rooms') or '—'}",
-        f"Кто будет жить: {data.get('residents') or '—'}",
-        f"Заселение: {data.get('move_date') or '—'}",
-        f"Телефон: {data.get('phone') or '—'}",
+        f"Комнат: {esc(data.get('rooms'))}",
+        f"Кто будет жить: {esc(data.get('residents'))}",
+        f"Заселение: {esc(data.get('move_date'))}",
+        f"Телефон: {esc(data.get('phone'))}",
     ]
     return "\n".join(lines)
 

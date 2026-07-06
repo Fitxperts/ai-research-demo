@@ -8,17 +8,39 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.types import BotCommand, ErrorEvent
 
 from bot.config import get_settings
 from bot.handlers import register_routers
 from bot.middlewares.db import DbSessionMiddleware
+from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.services.scheduler import setup_scheduler
+
+_COMMANDS = [
+    BotCommand(command="start", description="Начать / меню"),
+    BotCommand(command="add", description="Разместить объект"),
+    BotCommand(command="cancel", description="Отменить действие"),
+    BotCommand(command="help", description="Помощь"),
+]
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _register_error_handler(dp: Dispatcher, bot: Bot, settings) -> None:
+    @dp.errors()
+    async def on_error(event: ErrorEvent) -> bool:
+        logger.exception("Необработанная ошибка в хендлере", exc_info=event.exception)
+        text = f"⚠️ Ошибка бота: {type(event.exception).__name__}: {event.exception}"[:1000]
+        for admin_id in settings.admin_ids:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception:  # noqa: BLE001
+                pass
+        return True  # ошибка обработана
 
 
 async def main() -> None:
@@ -38,8 +60,15 @@ async def main() -> None:
     # Прокидываем сессию БД во все хендлеры
     dp.update.middleware(DbSessionMiddleware())
 
+    # Антифлуд на сообщения и колбэки
+    dp.message.middleware(ThrottlingMiddleware())
+    dp.callback_query.middleware(ThrottlingMiddleware())
+
     # Роутеры: клиент, собственник, админ
     register_routers(dp)
+
+    # Глобальный обработчик ошибок
+    _register_error_handler(dp, bot, settings)
 
     # Планировщик фоновых задач
     scheduler = setup_scheduler(bot)
@@ -48,6 +77,7 @@ async def main() -> None:
     logger.info("РиелторБот запущен")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_my_commands(_COMMANDS)
         await dp.start_polling(bot)
     finally:
         scheduler.shutdown(wait=False)
