@@ -1,4 +1,4 @@
-"""Конфигурация приложения, загружаемая из переменных окружения (.env)."""
+"""Конфигурация приложения и глобальные константы."""
 from __future__ import annotations
 
 import os
@@ -7,6 +7,10 @@ from functools import lru_cache
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# --- Константы приложения ---
+TIMEZONE = "Asia/Tashkent"          # часовой пояс планировщика и напоминаний
+BUMP_INTERVAL_DAYS = 3              # интервал автоподнятия объявлений (дни)
 
 
 class Settings:
@@ -24,8 +28,9 @@ class Settings:
         self.anthropic_api_key: str = os.environ["ANTHROPIC_API_KEY"]
         self.ai_model: str = os.getenv("AI_MODEL", "claude-opus-4-8")
 
-        # Планировщик
-        self.bump_interval_hours: int = int(os.getenv("BUMP_INTERVAL_HOURS", "24"))
+        # Константы (дублируем на объекте настроек для удобного доступа)
+        self.timezone: str = TIMEZONE
+        self.bump_interval_days: int = BUMP_INTERVAL_DAYS
 
     @staticmethod
     def _parse_admin_ids(raw: str) -> list[int]:
