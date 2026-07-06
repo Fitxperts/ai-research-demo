@@ -395,8 +395,8 @@ async def confirm_save(
         await callback.answer()
         return
 
-    # Генерация описания через ИИ
-    description = await get_ai_service().generate_description(data)
+    # Генерация краткого описания через ИИ (для карточки)
+    description = await get_ai_service().generate_short_description(data)
 
     photos = data.get("photos", [])
     prop = await crud.create_property(
