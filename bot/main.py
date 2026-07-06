@@ -10,6 +10,8 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 
 from bot.config import get_settings
+from bot.database.models import Base
+from bot.database.session import get_engine
 from bot.handlers import register_routers
 from bot.middlewares.db import DbSessionMiddleware
 from bot.services.scheduler import setup_scheduler
@@ -21,8 +23,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _init_db() -> None:
+    """Создать таблицы, если их ещё нет (для разработки; в проде — Alembic)."""
+    async with get_engine().begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
 async def main() -> None:
     settings = get_settings()
+
+    await _init_db()
 
     bot = Bot(
         token=settings.bot_token,

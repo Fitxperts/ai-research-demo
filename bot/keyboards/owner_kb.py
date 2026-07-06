@@ -1,30 +1,88 @@
-"""Клавиатуры сценария собственника."""
+"""Инлайн-клавиатуры сценария собственника."""
+from __future__ import annotations
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.database.models import Listing, ListingStatus
+PREFIX = "ow"
 
-PREFIX = "owner"
+RENOVATION = {
+    "rough": "Черновая",
+    "cosmetic": "Косметический",
+    "euro": "Евроремонт",
+    "designer": "Дизайнерский",
+}
 
 
-def photos_done_keyboard() -> InlineKeyboardMarkup:
+def deal_type_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Готово / без фото", callback_data=f"{PREFIX}:photos_done")]
+            [
+                InlineKeyboardButton(text="🔑 Аренда", callback_data=f"{PREFIX}:deal:rent"),
+                InlineKeyboardButton(text="🏷 Продажа", callback_data=f"{PREFIX}:deal:sale"),
+            ]
         ]
     )
 
 
-def listing_actions_keyboard(listing: Listing) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    if listing.status in (ListingStatus.published,):
-        rows.append(
-            [InlineKeyboardButton(text="⬆️ Поднять", callback_data=f"{PREFIX}:bump:{listing.id}")]
-        )
-        rows.append(
-            [InlineKeyboardButton(text="🗄 Снять с публикации", callback_data=f"{PREFIX}:archive:{listing.id}")]
-        )
-    if listing.status in (ListingStatus.draft, ListingStatus.rejected):
-        rows.append(
-            [InlineKeyboardButton(text="📤 Отправить на модерацию", callback_data=f"{PREFIX}:submit:{listing.id}")]
-        )
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def kind_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🏢 Квартира", callback_data=f"{PREFIX}:kind:apartment"),
+                InlineKeyboardButton(text="🏡 Дом", callback_data=f"{PREFIX}:kind:house"),
+            ],
+            [
+                InlineKeyboardButton(text="🌳 Участок", callback_data=f"{PREFIX}:kind:land"),
+                InlineKeyboardButton(text="🏬 Коммерция", callback_data=f"{PREFIX}:kind:commercial"),
+            ],
+        ]
+    )
+
+
+def yesno_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да", callback_data=f"{PREFIX}:bool:yes"),
+                InlineKeyboardButton(text="❌ Нет", callback_data=f"{PREFIX}:bool:no"),
+            ]
+        ]
+    )
+
+
+def renovation_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=label, callback_data=f"{PREFIX}:reno:{key}")]
+            for key, label in RENOVATION.items()
+        ]
+    )
+
+
+def skip_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Пропустить", callback_data=f"{PREFIX}:skip")]]
+    )
+
+
+def photos_done_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Готово / без фото", callback_data=f"{PREFIX}:pdone")]]
+    )
+
+
+def video_skip_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Без видео", callback_data=f"{PREFIX}:novideo")]]
+    )
+
+
+def confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"{PREFIX}:confirm"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"{PREFIX}:cancel"),
+            ]
+        ]
+    )

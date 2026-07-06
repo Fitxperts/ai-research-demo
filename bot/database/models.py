@@ -122,6 +122,9 @@ class Property(Base):
 
     description: Mapped[str | None] = mapped_column(Text)
 
+    photos: Mapped[str | None] = mapped_column(Text)  # file_id фото через запятую
+    video: Mapped[str | None] = mapped_column(String(255))  # file_id видео
+
     channel_post_id: Mapped[int | None] = mapped_column(Integer)
     last_bump: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -131,6 +134,10 @@ class Property(Base):
     meetings: Mapped[list["Meeting"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
+
+    @property
+    def photo_list(self) -> list[str]:
+        return [p for p in (self.photos or "").split(",") if p]
 
 
 class Client(Base):

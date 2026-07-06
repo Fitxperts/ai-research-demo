@@ -1,102 +1,115 @@
-"""ИИ-ассистент на базе Anthropic Claude.
+"""ИИ-ассистент на базе Anthropic Claude: генерация описаний объектов.
 
-Помогает клиенту сформулировать запрос на подбор недвижимости и отвечает
-на вопросы. Также умеет извлекать структурированные критерии поиска из
-свободного текста для последующего вызова :func:`crud.search_listings`.
+Совместимо с anthropic 0.28: используется базовый вызов messages.create без
+параметров thinking/output_config. При недоступности ИИ возвращается
+шаблонное описание, чтобы сценарий не прерывался.
 """
 from __future__ import annotations
 
-import json
 import logging
-
-from anthropic import APIError, AsyncAnthropic
 
 from bot.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = (
-    "Ты — вежливый ассистент риелтора в Telegram-боте. Помогаешь клиентам "
-    "подобрать недвижимость: уточняешь тип сделки (продажа/аренда), тип объекта, "
-    "район, бюджет и количество комнат. Отвечай кратко, по-русски, дружелюбно. "
-    "Не выдумывай конкретные объявления — их подбирает система по критериям."
-)
-
-# JSON-схема критериев, которые ИИ извлекает из свободного текста запроса.
-_EXTRACT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "deal_type": {"type": ["string", "null"], "enum": ["sale", "rent", None]},
-        "property_type": {
-            "type": ["string", "null"],
-            "enum": ["apartment", "house", "room", "commercial", None],
-        },
-        "district": {"type": ["string", "null"]},
-        "budget_min": {"type": ["number", "null"]},
-        "budget_max": {"type": ["number", "null"]},
-        "rooms": {"type": ["integer", "null"]},
-    },
-    "required": [
-        "deal_type",
-        "property_type",
-        "district",
-        "budget_min",
-        "budget_max",
-        "rooms",
-    ],
-    "additionalProperties": False,
+_KIND_LABELS = {
+    "apartment": "квартиру",
+    "house": "дом",
+    "land": "участок",
+    "commercial": "коммерческое помещение",
 }
+_DEAL_LABELS = {"rent": "аренду", "sale": "продажу"}
 
 
 class AIService:
     def __init__(self) -> None:
         settings = get_settings()
-        self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
         self._model = settings.ai_model
-
-    async def chat(self, message: str, history: list[dict] | None = None) -> str:
-        """Ответить на реплику клиента в свободном диалоге."""
-        messages = list(history or [])
-        messages.append({"role": "user", "content": message})
+        self._client = None
         try:
-            async with self._client.messages.stream(
-                model=self._model,
-                max_tokens=1024,
-                system=SYSTEM_PROMPT,
-                thinking={"type": "adaptive"},
-                messages=messages,
-            ) as stream:
-                response = await stream.get_final_message()
-        except APIError:
-            logger.exception("Ошибка обращения к Anthropic API")
-            return "Извините, ассистент сейчас недоступен. Попробуйте позже."
+            from anthropic import AsyncAnthropic
 
-        return "".join(block.text for block in response.content if block.type == "text").strip()
+            self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        except Exception:  # noqa: BLE001 - библиотека может быть недоступна
+            logger.warning("Anthropic SDK недоступен, используются шаблонные описания")
 
-    async def extract_criteria(self, text: str) -> dict:
-        """Извлечь структурированные критерии поиска из свободного текста."""
+    async def generate_description(self, data: dict) -> str:
+        """Сгенерировать привлекательное описание объекта на русском."""
+        prompt = self._build_prompt(data)
+        if self._client is None:
+            return self._fallback(data)
         try:
             response = await self._client.messages.create(
                 model=self._model,
-                max_tokens=512,
+                max_tokens=400,
                 system=(
-                    "Извлеки критерии поиска недвижимости из сообщения пользователя. "
-                    "Если параметр не указан — верни null."
+                    "Ты — риелтор. Составь короткое привлекательное описание объекта "
+                    "недвижимости на русском языке (2-4 предложения), без выдуманных фактов. "
+                    "Пиши по данным, что дал пользователь."
                 ),
-                messages=[{"role": "user", "content": text}],
-                output_config={"format": {"type": "json_schema", "schema": _EXTRACT_SCHEMA}},
+                messages=[{"role": "user", "content": prompt}],
             )
-        except APIError:
-            logger.exception("Ошибка извлечения критериев через Anthropic API")
-            return {}
+            text = "".join(getattr(b, "text", "") for b in response.content).strip()
+            return text or self._fallback(data)
+        except Exception:  # noqa: BLE001 - сеть/лимиты/ключ
+            logger.exception("Ошибка генерации описания через Anthropic")
+            return self._fallback(data)
 
-        raw = next((b.text for b in response.content if b.type == "text"), "{}")
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("ИИ вернул некорректный JSON: %s", raw)
-            return {}
-        return {k: v for k, v in data.items() if v is not None}
+    @staticmethod
+    def _build_prompt(data: dict) -> str:
+        parts = []
+        for key, label in (
+            ("property_kind", "Тип"),
+            ("deal_type", "Сделка"),
+            ("district", "Район"),
+            ("address", "Адрес"),
+            ("rooms", "Комнат"),
+            ("area", "Площадь, м²"),
+            ("floor", "Этаж"),
+            ("floors", "Этажность"),
+            ("renovation", "Ремонт"),
+            ("price", "Цена"),
+        ):
+            value = data.get(key)
+            if value not in (None, ""):
+                parts.append(f"{label}: {value}")
+        extras = [
+            name
+            for name, present in (
+                ("мебель", data.get("furniture")),
+                ("техника", data.get("appliances")),
+                ("газ", data.get("gas")),
+                ("вода", data.get("water")),
+                ("электричество", data.get("electricity")),
+                ("интернет", data.get("internet")),
+            )
+            if present
+        ]
+        if extras:
+            parts.append("Есть: " + ", ".join(extras))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _fallback(data: dict) -> str:
+        kind = _KIND_LABELS.get(data.get("property_kind", ""), "объект")
+        deal = _DEAL_LABELS.get(data.get("deal_type", ""), "")
+        district = data.get("district")
+        rooms = data.get("rooms")
+        area = data.get("area")
+        bits = [f"Сдаётся/продаётся {kind}".replace("Сдаётся/продаётся", "Предлагаем")]
+        detail = []
+        if rooms:
+            detail.append(f"{rooms}-комн.")
+        if area:
+            detail.append(f"{area:g} м²")
+        if district:
+            detail.append(f"район {district}")
+        line = f"{kind.capitalize()}"
+        if detail:
+            line += ", " + ", ".join(detail)
+        if deal:
+            line += f", на {deal}"
+        return line + ". Подробности — у риелтора."
 
 
 _service: AIService | None = None

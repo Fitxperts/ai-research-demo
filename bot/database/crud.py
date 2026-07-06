@@ -8,10 +8,19 @@ from bot.database.models import (
     BotUser,
     Client,
     Property,
+    PropertyKind,
     PropertyStatus,
     PropertyType,
     UserRole,
 )
+
+# Префикс идентификатора объекта по типу недвижимости (APT_1001, HSE_1001, ...)
+_KIND_PREFIX = {
+    PropertyKind.apartment: "APT",
+    PropertyKind.house: "HSE",
+    PropertyKind.land: "LND",
+    PropertyKind.commercial: "COM",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +100,45 @@ async def has_client(session: AsyncSession, telegram_id: int) -> bool:
 # ---------------------------------------------------------------------------
 # Объекты недвижимости
 # ---------------------------------------------------------------------------
+async def create_property(session: AsyncSession, *, property_kind: PropertyKind, **fields) -> Property:
+    prefix = _KIND_PREFIX.get(property_kind, "APT")
+    prop_id = await _next_id(session, Property, prefix, start=1001, pad=4)
+    prop = Property(id=prop_id, property_kind=property_kind, **fields)
+    session.add(prop)
+    await session.commit()
+    await session.refresh(prop)
+    return prop
+
+
+async def get_property(session: AsyncSession, property_id: str) -> Property | None:
+    return await session.get(Property, property_id)
+
+
+async def find_duplicate(
+    session: AsyncSession, *, phone: str | None, address: str | None
+) -> Property | None:
+    """Найти дубль по телефону собственника и адресу."""
+    if not phone or not address:
+        return None
+    return await session.scalar(
+        select(Property)
+        .where(Property.owner_phone == phone, Property.address.ilike(f"%{address}%"))
+        .limit(1)
+    )
+
+
+async def set_property_status(
+    session: AsyncSession, property_id: str, status: PropertyStatus
+) -> Property | None:
+    prop = await session.get(Property, property_id)
+    if prop is None:
+        return None
+    prop.status = status
+    await session.commit()
+    await session.refresh(prop)
+    return prop
+
+
 async def search_properties(
     session: AsyncSession,
     *,
