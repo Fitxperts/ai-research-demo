@@ -51,42 +51,47 @@ def _caption_post(photos: list[str], text: str) -> bool:
     return bool(photos) and len(text) <= CAPTION_LIMIT
 
 
-async def _send_album(bot: Bot, channel_id: str, photos: list[str], caption: str | None) -> None:
-    media = [
-        InputMediaPhoto(
-            media=fid,
-            caption=caption if (i == 0 and caption) else None,
-            parse_mode=ParseMode.MARKDOWN_V2 if (i == 0 and caption) else None,
-        )
-        for i, fid in enumerate(photos[:MAX_ALBUM])
-    ]
-    await bot.send_media_group(channel_id, media)
+async def _send_album(bot: Bot, channel_id: str, photos: list[str], caption: str | None) -> int | None:
+    """Отправить фото альбомами по MAX_ALBUM штук (Telegram не примет >10 разом).
+
+    Подпись ставится на первое фото первого альбома. Возвращает id первого
+    сообщения (для последующего редактирования подписи)."""
+    first_id: int | None = None
+    for start in range(0, len(photos), MAX_ALBUM):
+        chunk = photos[start : start + MAX_ALBUM]
+        media = [
+            InputMediaPhoto(
+                media=fid,
+                caption=caption if (start == 0 and i == 0 and caption) else None,
+                parse_mode=ParseMode.MARKDOWN_V2 if (start == 0 and i == 0 and caption) else None,
+            )
+            for i, fid in enumerate(chunk)
+        ]
+        messages = await bot.send_media_group(channel_id, media)
+        if first_id is None:
+            first_id = messages[0].message_id
+    return first_id
 
 
 async def _send_post(bot: Bot, channel_id: str, text: str, photos: list[str]) -> int:
     """Отправить пост и вернуть id сообщения, несущего описание (для будущих правок).
 
     - фото + короткий текст → подпись к фото/альбому (id = первое фото);
-    - фото + длинный текст (>1024) → альбом без подписи + отдельное текстовое
+    - фото + длинный текст (>1024) → альбом(ы) без подписи + отдельное текстовое
       сообщение (id = текстовое сообщение);
     - без фото → текстовое сообщение.
+    Альбомы бьются на пачки по 10 фото.
     """
     if photos and len(text) <= CAPTION_LIMIT:
         if len(photos) > 1:
-            media = [
-                InputMediaPhoto(
-                    media=fid,
-                    caption=text if i == 0 else None,
-                    parse_mode=ParseMode.MARKDOWN_V2 if i == 0 else None,
-                )
-                for i, fid in enumerate(photos[:MAX_ALBUM])
-            ]
-            messages = await bot.send_media_group(channel_id, media)
-            return messages[0].message_id
-        message = await bot.send_photo(channel_id, photos[0], caption=text, parse_mode=ParseMode.MARKDOWN_V2)
-        return message.message_id
+            first_id = await _send_album(bot, channel_id, photos, caption=text)
+            if first_id is not None:
+                return first_id
+        else:
+            message = await bot.send_photo(channel_id, photos[0], caption=text, parse_mode=ParseMode.MARKDOWN_V2)
+            return message.message_id
 
-    if photos:  # длинный текст — альбом без подписи + отдельное текстовое сообщение
+    if photos:  # длинный текст — альбом(ы) без подписи + отдельное текстовое сообщение
         await _send_album(bot, channel_id, photos, caption=None)
 
     message = await bot.send_message(channel_id, text, parse_mode=ParseMode.MARKDOWN_V2)

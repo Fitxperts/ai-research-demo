@@ -1,0 +1,60 @@
+# РиелторБот
+
+Telegram-бот для риелтора с тремя ролями (клиент, собственник, администратор).
+Стек: Python 3.11, aiogram 3.x, PostgreSQL + SQLAlchemy (async), Redis (FSM),
+Anthropic API, APScheduler, Docker.
+
+## Быстрый старт (Docker)
+
+```bash
+cp .env.example .env      # заполните BOT_TOKEN, ADMIN_TELEGRAM_ID, CHANNEL_ID, ANTHROPIC_API_KEY
+docker compose up --build
+```
+
+Контейнер бота при старте применяет миграции (`alembic upgrade head`) и
+запускает бота.
+
+## Переменные окружения (.env)
+
+| Переменная | Назначение |
+|---|---|
+| `BOT_TOKEN` | токен Telegram-бота |
+| `ADMIN_TELEGRAM_ID` | ID администратора(ов) через запятую |
+| `CHANNEL_ID` | канал публикации (`@username` или числовой id) |
+| `DATABASE_URL` | `postgresql+asyncpg://user:pass@db:5432/realtor` |
+| `REDIS_URL` | `redis://redis:6379/0` |
+| `ANTHROPIC_API_KEY` | ключ Anthropic |
+
+## Миграции (Alembic)
+
+Схемой БД управляет Alembic (не `create_all`).
+
+```bash
+alembic upgrade head                              # применить миграции
+alembic revision --autogenerate -m "add field"   # создать новую миграцию после правки моделей
+alembic downgrade -1                              # откатить последнюю
+```
+
+`migrations/versions/0001_initial.py` — базовая схема (properties, clients,
+meetings, bot_users).
+
+## Роли и сценарии
+
+- **Клиент** — анкета подбора недвижимости, показ подходящих объектов, выбор
+  времени звонка.
+- **Собственник** — размещение объекта по шагам **или** одним сообщением
+  (`2к чиланзар 450000 продажа хозяин +998...`), фото/видео, проверка дублей,
+  отправка на модерацию; раздел «Мои объекты».
+- **Администратор** — модерация с публикацией в канал, редактирование,
+  CRM-воронка клиентов, встречи, публикации, статистика.
+
+## Фоновые задачи (APScheduler, TZ Asia/Tashkent)
+
+- автоподнятие активных объектов (ежедневно 10:00, объекты старше 3 дней);
+- напоминания о встречах за день / за 2 часа / за 30 минут.
+
+## Оформление объявлений (премиум-эмодзи)
+
+В `bot/config.py` подставьте реальные ID кастомных эмодзи (`PREMIUM_EMOJI`) и
+контакты агентства (`AGENCY_CONTACTS`, `CHANNEL_URL`, `BOT_PUBLISH_URL`). Пока
+стоят заглушки — используются обычные эмодзи.

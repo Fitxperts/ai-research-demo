@@ -43,7 +43,12 @@ async def begin_property_form(message: Message, state: FSMContext) -> None:
     """Начать анкету размещения объекта (используется и админом)."""
     await state.clear()
     await state.set_state(OwnerForm.deal_type)
-    await message.answer("🏠 Разместим объект. Тип сделки?", reply_markup=owner_kb.deal_type_kb())
+    await message.answer(
+        "🏠 Разместим объект. Выберите тип сделки —\n"
+        "<i>или опишите объект одним сообщением, например:</i>\n"
+        "<code>2к чиланзар 450000 продажа хозяин +998901234567</code>",
+        reply_markup=owner_kb.deal_type_kb(),
+    )
 
 
 @router.message(Command("add"))
@@ -69,6 +74,33 @@ async def deal_cb(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OwnerForm.property_kind)
     await callback.message.edit_text("Вид объекта?", reply_markup=owner_kb.kind_kb())
     await callback.answer()
+
+
+@router.message(OwnerForm.deal_type, F.text)
+async def quick_add(message: Message, state: FSMContext) -> None:
+    """Быстрое добавление: собственник прислал всё одним сообщением."""
+    parsed = await get_ai_service().parse_free_text(message.text)
+    # если указаны комнаты, но не тип объекта — по умолчанию квартира
+    if parsed.get("rooms") and "property_kind" not in parsed:
+        parsed["property_kind"] = "apartment"
+
+    if not {"deal_type", "property_kind", "price"} <= parsed.keys():
+        await message.answer(
+            "Не удалось разобрать всё. Выберите тип сделки кнопкой и заполним по шагам.",
+            reply_markup=owner_kb.deal_type_kb(),
+        )
+        return
+
+    await state.update_data(
+        deal_type=parsed["deal_type"],
+        property_kind=parsed["property_kind"],
+        price=parsed["price"],
+        rooms=parsed.get("rooms"),
+        district=parsed.get("district"),
+        owner_phone=parsed.get("phone"),
+    )
+    await message.answer("✅ Распознал объявление из текста. Проверьте:")
+    await _show_confirm(message, state)
 
 
 @router.callback_query(OwnerForm.property_kind, F.data.startswith(f"{P}:kind:"))
