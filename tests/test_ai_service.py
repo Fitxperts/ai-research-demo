@@ -28,6 +28,11 @@ def test_generate_description_no_broken_emoji():
         ("2к чиланзар 450 хозяин", {"rooms": 2, "district": "Чиланзар", "price": 450.0}),
         ("продам 3 комн дом киргули 90000000", {"deal_type": "sale", "property_kind": "house", "rooms": 3}),
         ("сдаётся 1к центр 200000 +998901112233", {"deal_type": "rent", "phone": "+998901112233"}),
+        # узбекская латиница
+        ("2x margʻilon 450000 sotuv egasi", {"deal_type": "sale", "rooms": 2, "district": "Margʻilon"}),
+        ("3 xonali kvartira ijaraga fargʻona 2500000",
+         {"deal_type": "rent", "property_kind": "apartment", "rooms": 3, "district": "Fargʻona"}),
+        ("hovli sotiladi qirguli 90000000", {"deal_type": "sale", "property_kind": "house", "district": "Qirguli"}),
     ],
 )
 def test_parse_free_text(text, expect):

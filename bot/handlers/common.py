@@ -30,7 +30,7 @@ from bot.handlers.client import begin_client_form
 from bot.handlers.owner import begin_property_form
 from bot.keyboards import common_kb
 from bot.states.support_states import SupportForm
-from bot.utils.formatters import PROPERTY_STATUS_LABELS, format_property_card
+from bot.utils.formatters import format_property_card, property_status_label
 
 logger = logging.getLogger(__name__)
 router = Router(name="common")
@@ -129,8 +129,8 @@ async def menu_my_objects(message: Message, session: AsyncSession, lang: str) ->
         await message.answer(i18n.t("no_objects", lang))
         return
     for prop in props:
-        status = PROPERTY_STATUS_LABELS.get(prop.status, prop.status.value)
-        await message.answer(f"[{status}] " + format_property_card(prop))
+        status = property_status_label(prop.status, lang)
+        await message.answer(f"[{status}] " + format_property_card(prop, lang))
 
 
 # ---------------------------------------------------------------------------

@@ -1,29 +1,21 @@
-"""Форматирование доменных объектов для вывода в Telegram (HTML)."""
+"""Форматирование доменных объектов для вывода в Telegram (HTML, мультиязычно).
+
+Все функции принимают ``lang`` (по умолчанию ``ru``) и берут подписи из
+каталога ``bot.i18n``. Данные (адреса, имена, суммы) не переводятся.
+"""
 from __future__ import annotations
 
 from html import escape
 
+from bot import i18n
 from bot.database.models import (
     Client,
-    ClientDealType,
-    ClientStatus,
     Meeting,
-    MeetingStatus,
     Property,
-    PropertyKind,
     PropertyStatus,
-    PropertyType,
 )
 
-CLIENT_DEAL_LABELS = {ClientDealType.rent: "Аренда", ClientDealType.buy: "Покупка"}
-CLIENT_STATUS_LABELS = {
-    ClientStatus.new: "Новый",
-    ClientStatus.contacted: "Связались",
-    ClientStatus.showing_set: "Показ назначен",
-    ClientStatus.showing_done: "Показ проведён",
-    ClientStatus.deal: "Сделка",
-    ClientStatus.closed: "Закрыт",
-}
+# Русские подписи статусов объекта (для обратной совместимости/экспорта)
 PROPERTY_STATUS_LABELS = {
     PropertyStatus.pending: "На проверке",
     PropertyStatus.active: "Активно",
@@ -31,18 +23,10 @@ PROPERTY_STATUS_LABELS = {
     PropertyStatus.sold: "Продано",
     PropertyStatus.archived: "Архив",
 }
-MEETING_STATUS_LABELS = {
-    MeetingStatus.planned: "Запланирована",
-    MeetingStatus.done: "Проведена",
-    MeetingStatus.cancelled: "Отменена",
-}
-PROPERTY_TYPE_LABELS = {PropertyType.rent: "Аренда", PropertyType.sale: "Продажа"}
-KIND_LABELS = {
-    PropertyKind.apartment: "Квартира",
-    PropertyKind.house: "Дом",
-    PropertyKind.land: "Участок",
-    PropertyKind.commercial: "Коммерческая",
-}
+
+
+def property_status_label(status: PropertyStatus, lang: str = "ru") -> str:
+    return i18n.t(f"pst_{status.value}", lang)
 
 
 def format_money(value: float | None, currency: str | None) -> str:
@@ -51,27 +35,27 @@ def format_money(value: float | None, currency: str | None) -> str:
     return f"{int(value):,}".replace(",", " ") + f" {currency or ''}".rstrip()
 
 
-def format_client_card(client: Client) -> str:
-    deal = CLIENT_DEAL_LABELS.get(client.deal_type, client.deal_type.value)
+def format_client_card(client: Client, lang: str = "ru") -> str:
+    deal = i18n.t(f"cd_{client.deal_type.value}", lang)
     lines = [
-        f"🆕 <b>Заявка {escape(client.id)}</b>",
+        i18n.t("cc_request", lang, id=escape(client.id)),
         f"👤 {escape(client.name or '—')}",
         f"📞 {escape(client.phone or '—')}",
         "",
-        f"Сделка: <b>{deal}</b>",
-        f"Район: {escape(client.district or '—')}",
-        f"Комнат: {client.rooms if client.rooms else '—'}",
-        f"Бюджет: <b>{format_money(client.budget, client.currency)}</b>",
-        f"Кто будет жить: {escape(client.residents or '—')}",
+        f"{i18n.t('cc_deal', lang)}: <b>{deal}</b>",
+        f"{i18n.t('cc_district', lang)}: {escape(client.district or '—')}",
+        f"{i18n.t('cc_rooms', lang)}: {client.rooms if client.rooms else '—'}",
+        f"{i18n.t('cc_budget', lang)}: <b>{format_money(client.budget, client.currency)}</b>",
+        f"{i18n.t('cc_residents', lang)}: {escape(client.residents or '—')}",
     ]
     if client.move_date:
-        lines.append(f"Заселение: {client.move_date.strftime('%d.%m.%Y')}")
+        lines.append(f"{i18n.t('cc_movein', lang)}: {client.move_date.strftime('%d.%m.%Y')}")
     return "\n".join(lines)
 
 
-def format_property_card(prop: Property) -> str:
-    kind = KIND_LABELS.get(prop.property_kind, prop.property_kind.value)
-    deal = PROPERTY_TYPE_LABELS.get(prop.type, prop.type.value)
+def format_property_card(prop: Property, lang: str = "ru") -> str:
+    kind = i18n.t(f"kw_{prop.property_kind.value}", lang)
+    deal = i18n.t(f"pt_{prop.type.value}", lang)
     lines = [f"🏠 <b>{kind} · {deal}</b> <code>{escape(prop.id)}</code>"]
 
     location = ", ".join(x for x in (prop.district, prop.address) if x)
@@ -80,20 +64,20 @@ def format_property_card(prop: Property) -> str:
 
     facts: list[str] = []
     if prop.rooms:
-        facts.append(f"🛏 {prop.rooms}-комн.")
+        facts.append(f"🛏 {prop.rooms}{i18n.t('card_rooms_suffix', lang)}")
     if prop.area:
-        facts.append(f"📐 {prop.area:g} м²")
+        facts.append(f"📐 {prop.area:g} {i18n.t('card_area_unit', lang)}")
     if prop.floor and prop.floors:
-        facts.append(f"🏢 {prop.floor}/{prop.floors} эт.")
+        facts.append(f"🏢 {prop.floor}/{prop.floors} {i18n.t('card_floor_suffix', lang)}")
     if facts:
         lines.append(" · ".join(facts))
 
     price = format_money(prop.price, prop.currency)
     if prop.negotiable:
-        price += " (торг)"
+        price += f" ({i18n.t('card_neg', lang)})"
     lines.append(f"💰 <b>{price}</b>")
 
-    comms = _communications(prop)
+    comms = _communications(prop, lang)
     if comms:
         lines.append("✅ " + ", ".join(comms))
 
@@ -104,7 +88,7 @@ def format_property_card(prop: Property) -> str:
 
 
 def format_property_brief(prop: Property) -> str:
-    """Краткая строка объекта: APT_1012 (Чиланзар, 2к, 65м², 450 сум)."""
+    """Краткая строка объекта: APT_1012 (Центр, 2к, 65м², 450 сум)."""
     details: list[str] = []
     if prop.district:
         details.append(prop.district)
@@ -118,33 +102,37 @@ def format_property_brief(prop: Property) -> str:
     return f"{escape(prop.id)} ({escape(inner)})" if inner else escape(prop.id)
 
 
-def format_client_short(client: Client) -> str:
-    deal = CLIENT_DEAL_LABELS.get(client.deal_type, client.deal_type.value)
-    status = CLIENT_STATUS_LABELS.get(client.status, client.status.value)
-    parts = [f"<b>{escape(client.id)}</b> · {escape(client.name or '—')}"]
-    parts.append(f"{deal} · {escape(client.district or 'любой район')}")
-    parts.append(f"Бюджет: {format_money(client.budget, client.currency)}")
-    parts.append(f"📞 {escape(client.phone or '—')} · Статус: <b>{status}</b>")
+def format_client_short(client: Client, lang: str = "ru") -> str:
+    deal = i18n.t(f"cd_{client.deal_type.value}", lang)
+    status = i18n.t(f"cst_{client.status.value}", lang)
+    district = client.district or i18n.t("cc_any_district", lang)
+    parts = [
+        f"<b>{escape(client.id)}</b> · {escape(client.name or '—')}",
+        f"{deal} · {escape(district)}",
+        f"{i18n.t('cc_budget', lang)}: {format_money(client.budget, client.currency)}",
+        f"📞 {escape(client.phone or '—')} · {i18n.t('cc_status', lang)}: <b>{status}</b>",
+    ]
     return "\n".join(parts)
 
 
-def format_meeting(meeting: Meeting) -> str:
+def format_meeting(meeting: Meeting, lang: str = "ru") -> str:
     when = meeting.datetime.strftime("%d.%m.%Y %H:%M") if meeting.datetime else "—"
-    status = MEETING_STATUS_LABELS.get(meeting.status, meeting.status.value)
+    status = i18n.t(f"mst_{meeting.status.value}", lang)
     return (
         f"📆 <b>{escape(meeting.id)}</b> — {when}\n"
-        f"Клиент: {escape(meeting.client_id)} · Объект: {escape(meeting.property_id)}\n"
-        f"Статус: {status}"
+        f"{i18n.t('mc_client', lang)}: {escape(meeting.client_id)} · "
+        f"{i18n.t('mc_object', lang)}: {escape(meeting.property_id)}\n"
+        f"{i18n.t('mc_status', lang)}: {status}"
     )
 
 
-def _communications(prop: Property) -> list[str]:
+def _communications(prop: Property, lang: str = "ru") -> list[str]:
     mapping = [
-        (prop.furniture, "мебель"),
-        (prop.appliances, "техника"),
-        (prop.gas, "газ"),
-        (prop.water, "вода"),
-        (prop.electricity, "свет"),
-        (prop.internet, "интернет"),
+        (prop.furniture, "comm_furniture"),
+        (prop.appliances, "comm_appliances"),
+        (prop.gas, "comm_gas"),
+        (prop.water, "comm_water"),
+        (prop.electricity, "comm_electricity"),
+        (prop.internet, "comm_internet"),
     ]
-    return [label for present, label in mapping if present]
+    return [i18n.t(key, lang) for present, key in mapping if present]

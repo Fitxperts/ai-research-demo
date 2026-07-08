@@ -180,17 +180,30 @@ class AIService:
             logger.exception("Ошибка разбора текста через ИИ")
         return {}
 
+    # Стоп-слова (префиксы) для отсева служебных слов при поиске района.
+    # Русские + узбекская латиница + английские.
     _STOPWORDS = {
+        # RU
         "аренд", "ижара", "сдам", "сдается", "сдаётся", "продаж", "сотув",
         "продам", "сотилади", "хозяин", "срочно", "комн", "хона", "сум", "сўм",
-        "дом", "квартира", "участок",
+        "дом", "квартира", "участок", "коммерч", "тижорат", "офис", "этаж", "кв",
+        # UZ (latin)
+        "ijara", "sotuv", "sotil", "sotaman", "kvartira", "hovli", "uchastka",
+        "xona", "xonali", "egasi", "shoshilinch", "som", "sum", "uy", "yer",
+        "ofis", "tijorat", "qavat", "narx",
+        # EN
+        "rent", "sale", "owner", "room", "apartment", "house", "land",
+        "commercial", "floor",
     }
     _KIND_WORDS = (
-        ("apartment", ("квартир", "кв", "хона")),
-        ("house", ("дом", "ҳовли", "уй")),
-        ("land", ("участок", "ер")),
-        ("commercial", ("коммерч", "тижорат", "офис")),
+        ("apartment", ("квартир", "кв", "хона", "kvartira", "xona", "apartment")),
+        ("house", ("дом", "ҳовли", "уй", "hovli", "uy", "house")),
+        ("land", ("участок", "ер", "uchastka", "yer", "land")),
+        ("commercial", ("коммерч", "тижорат", "офис", "tijorat", "ofis", "commercial")),
     )
+    _RENT_WORDS = ("аренд", "ижара", "сдам", "сдаётся", "сдается", "ijara", "rent")
+    _SALE_WORDS = ("продаж", "сотув", "продам", "сотилади", "сотиш", "sotuv",
+                   "sotiladi", "sotaman", "sotil", "sale")
 
     @classmethod
     def _parse_regex(cls, text: str) -> dict:
@@ -204,10 +217,10 @@ class AIService:
             work = text.replace(phone.group(), " ")
         low = work.lower()
 
-        # Тип сделки
-        if any(w in low for w in ("аренд", "ижара", "сдам", "сдаётся", "сдается")):
+        # Тип сделки (RU / UZ-latin / EN)
+        if any(w in low for w in cls._RENT_WORDS):
             result["deal_type"] = "rent"
-        elif any(w in low for w in ("продаж", "сотув", "продам", "сотилади")):
+        elif any(w in low for w in cls._SALE_WORDS):
             result["deal_type"] = "sale"
 
         # Вид объекта
@@ -216,8 +229,8 @@ class AIService:
                 result["property_kind"] = kind
                 break
 
-        # Комнаты: "2к", "3 комн", "2-х"
-        rooms = re.search(r"(\d+)\s*[-хx]?\s*(?:к|комн|хона)", low)
+        # Комнаты: "2к", "3 комн", "2-х", "2x", "3 xona", "2 xonali"
+        rooms = re.search(r"(\d+)\s*[-]?\s*(?:комн|хонали|хона|xonali|xona|к|x)", low)
         if rooms:
             result["rooms"] = int(rooms.group(1))
 
@@ -226,11 +239,14 @@ class AIService:
         if numbers:
             result["price"] = float(max(numbers))
 
-        # Район: первое подходящее кириллическое слово (не стоп-слово)
-        for token in re.findall(r"[а-яёўқғҳ]{4,}", low):
-            if token not in cls._STOPWORDS:
-                result["district"] = token.capitalize()
-                break
+        # Район: первое подходящее слово (кириллица ИЛИ узбекская латиница),
+        # не начинающееся со стоп-слова.
+        for token in re.findall(r"[a-zа-яёўқғҳ][a-zа-яёўқғҳʻ’']{2,}", low):
+            clean = token.strip("ʻ’'")
+            if len(clean) < 3 or any(clean.startswith(sw) for sw in cls._STOPWORDS):
+                continue
+            result["district"] = clean.capitalize()
+            break
 
         return result
 

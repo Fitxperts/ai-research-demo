@@ -389,7 +389,7 @@ async def _show_confirm(message: Message, state: FSMContext, lang: str) -> None:
     preview = _build_preview(data)
     await state.set_state(OwnerForm.confirm)
     await message.answer(i18n.t("owner_confirm_title", lang))
-    await message.answer(format_property_card(preview), reply_markup=owner_kb.confirm_kb(lang))
+    await message.answer(format_property_card(preview, lang), reply_markup=owner_kb.confirm_kb(lang))
 
 
 @router.callback_query(OwnerForm.confirm, F.data == f"{P}:cancel")

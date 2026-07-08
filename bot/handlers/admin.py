@@ -1,4 +1,10 @@
-"""Хендлеры администратора: объекты, клиенты, встречи, публикации, статистика."""
+"""Хендлеры администратора: объекты, клиенты, встречи, публикации, статистика.
+
+Мультиязычно: язык берётся из middleware (bot_users.language). Админ выбирает
+язык при первом входе и кнопкой «🌐 Язык». Уведомления, отправляемые из других
+модулей (модерация нового объекта), остаются на русском — единый канонический
+текст для рассылки нескольким админам.
+"""
 from __future__ import annotations
 
 import datetime as dt
@@ -10,9 +16,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import i18n
 from bot.config import BUMP_INTERVAL_DAYS, get_settings
 from bot.database import crud
 from bot.database.models import (
+    BotUser,
     ClientStatus,
     MeetingStatus,
     Property,
@@ -24,15 +32,24 @@ from bot.services import export, matcher, publisher
 from bot.states.admin_states import EditProperty, ScheduleMeeting
 from bot.utils import timeutils
 from bot.utils.formatters import (
-    PROPERTY_STATUS_LABELS,
     format_client_short,
     format_meeting,
     format_property_card,
+    property_status_label,
 )
 from bot.utils.validators import parse_int, parse_price
 
 logger = logging.getLogger(__name__)
 P = admin_kb.PREFIX
+
+# Подписи reply-меню админа на всех языках (матчинг по тексту)
+BTN_NEW = i18n.btn_variants("adm_new")
+BTN_OBJECTS = i18n.btn_variants("adm_objects")
+BTN_CLIENTS = i18n.btn_variants("adm_clients")
+BTN_MEETINGS = i18n.btn_variants("adm_meetings")
+BTN_PUBLICATIONS = i18n.btn_variants("adm_publications")
+BTN_STATS = i18n.btn_variants("adm_stats")
+BTN_LANGUAGE = i18n.btn_variants("language")
 
 
 class IsAdmin(BaseFilter):
@@ -52,60 +69,81 @@ _STATUS_FILTER = {
     "sold": [PropertyStatus.rented, PropertyStatus.sold],
 }
 
+PAGE = 5  # объектов/клиентов на страницу
+
 
 # ---------------------------------------------------------------------------
-# Меню
+# Меню и язык
 # ---------------------------------------------------------------------------
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, lang: str) -> None:
     await state.clear()
-    await crud.get_or_create_user(
+    user = await crud.get_or_create_user(
         session,
         message.from_user.id,
         username=message.from_user.username,
         full_name=message.from_user.full_name,
         is_admin=True,
     )
-    await message.answer("🛠 Панель администратора", reply_markup=admin_kb.main_menu())
+    if not user.language:
+        await message.answer(
+            "🌐 Tilni tanlang / Выберите язык / Choose your language:",
+            reply_markup=admin_kb.language_kb(),
+        )
+        return
+    await message.answer(i18n.t("adm_panel_title", lang), reply_markup=admin_kb.main_menu(lang))
 
 
-@router.message(F.text == "➕ Новый объект")
-async def new_object(message: Message, state: FSMContext) -> None:
-    await begin_property_form(message, state, "ru")  # админ-панель на русском
+@router.message(F.text.in_(BTN_LANGUAGE))
+async def admin_language(message: Message) -> None:
+    await message.answer(
+        "🌐 Tilni tanlang / Выберите язык / Choose your language:",
+        reply_markup=admin_kb.language_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("alang:"))
+async def admin_set_language(callback: CallbackQuery, session: AsyncSession) -> None:
+    code = i18n.normalize(callback.data.split(":")[1])
+    await crud.set_language(session, callback.from_user.id, code)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    await callback.message.answer(i18n.t("language_saved", code, name=i18n.LANGUAGES[code]))
+    await callback.message.answer(i18n.t("adm_panel_title", code), reply_markup=admin_kb.main_menu(code))
+
+
+@router.message(F.text.in_(BTN_NEW))
+async def new_object(message: Message, state: FSMContext, lang: str) -> None:
+    await begin_property_form(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Раздел: Объекты
 # ---------------------------------------------------------------------------
-@router.message(F.text == "📋 Объекты")
-async def objects_menu(message: Message) -> None:
-    await message.answer("📋 Объекты — выберите фильтр:", reply_markup=admin_kb.object_filters_kb())
-
-
-PAGE = 5  # объектов/клиентов на страницу
+@router.message(F.text.in_(BTN_OBJECTS))
+async def objects_menu(message: Message, lang: str) -> None:
+    await message.answer(i18n.t("adm_objects_filter", lang), reply_markup=admin_kb.object_filters_kb(lang))
 
 
 @router.callback_query(F.data.startswith(f"{P}:objs:"))
-async def objects_list(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
+async def objects_list(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     parts = callback.data.split(":")
     key = parts[2]
     offset = int(parts[3]) if len(parts) > 3 else 0
     props = await crud.list_properties(session, statuses=_STATUS_FILTER.get(key), limit=PAGE, offset=offset)
     await callback.answer()
     if not props:
-        await callback.message.answer("Больше объектов нет." if offset else "Ничего не найдено.")
+        await callback.message.answer(i18n.t("adm_no_more", lang) if offset else i18n.t("adm_nothing_found", lang))
         return
     for prop in props:
-        await _show_property(callback.message, prop, admin_kb.object_actions_kb(prop))
+        await _show_property(callback.message, prop, admin_kb.object_actions_kb(prop, lang), lang)
     if len(props) == PAGE:
-        await callback.message.answer(
-            "…", reply_markup=admin_kb.more_kb(f"{P}:objs:{key}:{offset + PAGE}")
-        )
+        await callback.message.answer("…", reply_markup=admin_kb.more_kb(f"{P}:objs:{key}:{offset + PAGE}", lang))
 
 
-async def _show_property(target: Message, prop: Property, kb) -> None:
-    status = PROPERTY_STATUS_LABELS.get(prop.status, prop.status.value)
-    text = f"[{status}] " + format_property_card(prop)
+async def _show_property(target: Message, prop: Property, kb, lang: str) -> None:
+    status = property_status_label(prop.status, lang)
+    text = f"[{status}] " + format_property_card(prop, lang)
     photos = prop.photo_list
     if photos:
         await target.answer_photo(photos[0], caption=text, reply_markup=kb)
@@ -115,89 +153,88 @@ async def _show_property(target: Message, prop: Property, kb) -> None:
 
 # --- действия с объектом ---
 @router.callback_query(F.data.startswith(f"{P}:approve:"))
-async def approve(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
+async def approve(callback: CallbackQuery, session: AsyncSession, bot: Bot, lang: str) -> None:
     property_id = callback.data.split(":")[2]
     try:
         prop = await publisher.publish_property(bot, session, property_id)
     except Exception:  # noqa: BLE001 - ошибка отправки в канал не должна «вешать» callback
         logger.exception("Ошибка публикации объекта %s", property_id)
-        await callback.answer("Ошибка публикации. Проверьте канал/права бота.", show_alert=True)
+        await callback.answer(i18n.t("adm_publish_error", lang), show_alert=True)
         return
     if prop is None:
-        await callback.answer("Объект не найден", show_alert=True)
+        await callback.answer(i18n.t("adm_not_found", lang), show_alert=True)
         return
     await _clear_markup(callback)
-    await callback.answer("Опубликовано ✅", show_alert=True)
-    await _notify_owner(bot, prop, f"✅ Ваш объект {prop.id} опубликован!")
+    await callback.answer(i18n.t("adm_t_published", lang), show_alert=True)
+    await _notify_owner(bot, session, prop, "adm_published_owner", id=prop.id)
 
 
 @router.callback_query(F.data.startswith(f"{P}:hold:"))
-async def hold(callback: CallbackQuery, session: AsyncSession) -> None:
+async def hold(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     await crud.set_property_status(session, callback.data.split(":")[2], PropertyStatus.pending)
     await _clear_markup(callback)
-    await callback.answer("Отложено ⏸", show_alert=True)
+    await callback.answer(i18n.t("adm_t_hold", lang), show_alert=True)
 
 
 @router.callback_query(F.data.startswith(f"{P}:sold:"))
-async def sold(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
+async def sold(callback: CallbackQuery, session: AsyncSession, bot: Bot, lang: str) -> None:
     await publisher.mark_as_rented(bot, session, callback.data.split(":")[2])
     await _clear_markup(callback)
-    await callback.answer("Отмечено как сдано/продано ⛔", show_alert=True)
+    await callback.answer(i18n.t("adm_t_sold", lang), show_alert=True)
 
 
 @router.callback_query(F.data.startswith(f"{P}:bump:"))
-async def bump(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
+async def bump(callback: CallbackQuery, session: AsyncSession, bot: Bot, lang: str) -> None:
     await publisher.bump_property(bot, session, callback.data.split(":")[2])
-    await callback.answer("Поднято 📢", show_alert=True)
+    await callback.answer(i18n.t("adm_t_bumped", lang), show_alert=True)
 
 
 @router.callback_query(F.data.startswith(f"{P}:arch:"))
-async def archive(callback: CallbackQuery, session: AsyncSession) -> None:
+async def archive(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     await crud.set_property_status(session, callback.data.split(":")[2], PropertyStatus.archived)
     await _clear_markup(callback)
-    await callback.answer("В архиве 🗄", show_alert=True)
+    await callback.answer(i18n.t("adm_t_archived", lang), show_alert=True)
 
 
 # --- редактирование объекта ---
 @router.callback_query(F.data.startswith(f"{P}:edit:"))
-async def edit_start(callback: CallbackQuery) -> None:
+async def edit_start(callback: CallbackQuery, lang: str) -> None:
     property_id = callback.data.split(":")[2]
     await callback.message.answer(
-        f"✏️ Редактирование {property_id}. Что изменить?",
-        reply_markup=admin_kb.edit_fields_kb(property_id),
+        i18n.t("adm_edit_title", lang, id=property_id),
+        reply_markup=admin_kb.edit_fields_kb(property_id, lang),
     )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith(f"{P}:efield:"))
-async def edit_field(callback: CallbackQuery, state: FSMContext) -> None:
+async def edit_field(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     _, _, property_id, field = callback.data.split(":")
     await state.update_data(property_id=property_id, field=field)
     await state.set_state(EditProperty.value)
-    label = admin_kb.EDIT_FIELDS.get(field, field)
-    await callback.message.answer(f"Введите новое значение — {label}:")
+    await callback.message.answer(i18n.t("adm_edit_prompt", lang, field=admin_kb.edit_field_label(field, lang)))
     await callback.answer()
 
 
 @router.message(EditProperty.value, F.text)
-async def edit_value(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def edit_value(message: Message, state: FSMContext, session: AsyncSession, lang: str) -> None:
     data = await state.get_data()
     field, property_id = data["field"], data["property_id"]
     prop = await crud.get_property(session, property_id)
     if prop is None:
         await state.clear()
-        await message.answer("Объект не найден.")
+        await message.answer(i18n.t("adm_obj_not_found", lang))
         return
 
     if field in ("price", "area"):
         value = parse_price(message.text)
         if value is None:
-            await message.answer("Введите число.")
+            await message.answer(i18n.t("adm_enter_number", lang))
             return
     elif field == "rooms":
         value = parse_int(message.text)
         if value is None:
-            await message.answer("Введите целое число.")
+            await message.answer(i18n.t("adm_enter_int", lang))
             return
     else:
         value = message.text.strip()
@@ -205,141 +242,141 @@ async def edit_value(message: Message, state: FSMContext, session: AsyncSession)
     setattr(prop, field, value)
     await session.commit()
     await state.clear()
-    await message.answer(f"✅ Поле «{admin_kb.EDIT_FIELDS.get(field, field)}» обновлено.")
+    await message.answer(i18n.t("adm_field_updated", lang, field=admin_kb.edit_field_label(field, lang)))
 
 
 # ---------------------------------------------------------------------------
 # Раздел: Клиенты
 # ---------------------------------------------------------------------------
-@router.message(F.text == "👥 Клиенты")
-async def clients_list(message: Message, session: AsyncSession) -> None:
-    await _show_clients_page(message, session, offset=0)
+@router.message(F.text.in_(BTN_CLIENTS))
+async def clients_list(message: Message, session: AsyncSession, lang: str) -> None:
+    await _show_clients_page(message, session, lang, offset=0)
 
 
 @router.callback_query(F.data.startswith(f"{P}:cli:"))
-async def clients_more(callback: CallbackQuery, session: AsyncSession) -> None:
+async def clients_more(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     await callback.answer()
-    await _show_clients_page(callback.message, session, offset=int(callback.data.split(":")[2]))
+    await _show_clients_page(callback.message, session, lang, offset=int(callback.data.split(":")[2]))
 
 
-async def _show_clients_page(target: Message, session: AsyncSession, *, offset: int) -> None:
+async def _show_clients_page(target: Message, session: AsyncSession, lang: str, *, offset: int) -> None:
     clients = await crud.list_clients(session, limit=PAGE, offset=offset)
     if not clients:
-        await target.answer("Больше заявок нет." if offset else "Заявок пока нет.")
+        await target.answer(i18n.t("adm_no_more_clients", lang) if offset else i18n.t("adm_no_clients", lang))
         return
     for client in clients:
-        await target.answer(format_client_short(client), reply_markup=admin_kb.client_actions_kb(client))
+        await target.answer(format_client_short(client, lang), reply_markup=admin_kb.client_actions_kb(client, lang))
     if len(clients) == PAGE:
-        await target.answer("…", reply_markup=admin_kb.more_kb(f"{P}:cli:{offset + PAGE}"))
+        await target.answer("…", reply_markup=admin_kb.more_kb(f"{P}:cli:{offset + PAGE}", lang))
 
 
 @router.callback_query(F.data.startswith(f"{P}:cstatus:"))
-async def change_client_status(callback: CallbackQuery, session: AsyncSession) -> None:
+async def change_client_status(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     _, _, client_id, status = callback.data.split(":")
     client = await crud.set_client_status(session, client_id, ClientStatus(status))
     if client:
         await callback.message.edit_text(
-            format_client_short(client), reply_markup=admin_kb.client_actions_kb(client)
+            format_client_short(client, lang), reply_markup=admin_kb.client_actions_kb(client, lang)
         )
-    await callback.answer("Статус обновлён")
+    await callback.answer(i18n.t("adm_status_updated", lang))
 
 
 @router.callback_query(F.data.startswith(f"{P}:cmatch:"))
-async def client_matches(callback: CallbackQuery, session: AsyncSession) -> None:
+async def client_matches(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     client = await crud.get_client(session, callback.data.split(":")[2])
     await callback.answer()
     if client is None:
         return
     props = await matcher.find_for_client(session, client)
     if not props:
-        await callback.message.answer("Подходящих объектов нет.")
+        await callback.message.answer(i18n.t("adm_no_matches", lang))
         return
-    await callback.message.answer(f"🔎 Подходящие объекты для {client.id}:")
+    await callback.message.answer(i18n.t("adm_client_matches", lang, id=client.id))
     for prop in props:
-        await callback.message.answer(format_property_card(prop))
+        await callback.message.answer(format_property_card(prop, lang))
 
 
 # ---------------------------------------------------------------------------
 # Раздел: Встречи
 # ---------------------------------------------------------------------------
-@router.message(F.text == "📆 Встречи")
-async def meetings_list(message: Message, session: AsyncSession) -> None:
+@router.message(F.text.in_(BTN_MEETINGS))
+async def meetings_list(message: Message, session: AsyncSession, lang: str) -> None:
     meetings = await crud.upcoming_meetings(session)
     if meetings:
         for meeting in meetings:
-            await message.answer(format_meeting(meeting), reply_markup=admin_kb.meeting_actions_kb(meeting.id))
+            await message.answer(format_meeting(meeting, lang), reply_markup=admin_kb.meeting_actions_kb(meeting.id, lang))
     else:
-        await message.answer("Запланированных встреч нет.")
-    await message.answer("Управление встречами:", reply_markup=admin_kb.meetings_menu_kb())
+        await message.answer(i18n.t("adm_no_meetings", lang))
+    await message.answer(i18n.t("adm_meetings_manage", lang), reply_markup=admin_kb.meetings_menu_kb(lang))
 
 
 @router.callback_query(F.data.startswith(f"{P}:mdone:"))
-async def meeting_done(callback: CallbackQuery, session: AsyncSession) -> None:
+async def meeting_done(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     meeting = await crud.set_meeting_status(session, callback.data.split(":")[2], MeetingStatus.done)
     if meeting:
         await crud.set_client_status(session, meeting.client_id, ClientStatus.showing_done)
         await _clear_markup(callback)
-    await callback.answer("Встреча проведена ✅", show_alert=True)
+    await callback.answer(i18n.t("adm_t_meeting_done", lang), show_alert=True)
 
 
 @router.callback_query(F.data.startswith(f"{P}:mcancel:"))
-async def meeting_cancel(callback: CallbackQuery, session: AsyncSession) -> None:
+async def meeting_cancel(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     await crud.set_meeting_status(session, callback.data.split(":")[2], MeetingStatus.cancelled)
     await _clear_markup(callback)
-    await callback.answer("Встреча отменена ❌", show_alert=True)
+    await callback.answer(i18n.t("adm_t_meeting_cancel", lang), show_alert=True)
 
 
 @router.callback_query(F.data == f"{P}:meet_new")
-async def meeting_new(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def meeting_new(callback: CallbackQuery, state: FSMContext, session: AsyncSession, lang: str) -> None:
     clients = await crud.list_clients(session, limit=10)
     if not clients:
-        await callback.answer("Нет клиентов", show_alert=True)
+        await callback.answer(i18n.t("adm_no_clients_alert", lang), show_alert=True)
         return
     await state.set_state(ScheduleMeeting.client)
-    await callback.message.answer("Выберите клиента:", reply_markup=admin_kb.pick_clients_kb(clients))
+    await callback.message.answer(i18n.t("adm_pick_client", lang), reply_markup=admin_kb.pick_clients_kb(clients))
     await callback.answer()
 
 
 @router.callback_query(ScheduleMeeting.client, F.data.startswith(f"{P}:mclient:"))
-async def meeting_pick_client(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def meeting_pick_client(callback: CallbackQuery, state: FSMContext, session: AsyncSession, lang: str) -> None:
     await state.update_data(client_id=callback.data.split(":")[2])
     props = await crud.list_properties(session, statuses=[PropertyStatus.active], limit=10)
     if not props:
         await state.clear()
-        await callback.answer("Нет активных объектов", show_alert=True)
+        await callback.answer(i18n.t("adm_no_active", lang), show_alert=True)
         return
     await state.set_state(ScheduleMeeting.property)
-    await callback.message.edit_text("Выберите объект:", reply_markup=admin_kb.pick_properties_kb(props))
+    await callback.message.edit_text(i18n.t("adm_pick_object", lang), reply_markup=admin_kb.pick_properties_kb(props))
     await callback.answer()
 
 
 @router.callback_query(ScheduleMeeting.property, F.data.startswith(f"{P}:mprop:"))
-async def meeting_pick_property(callback: CallbackQuery, state: FSMContext) -> None:
+async def meeting_pick_property(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await state.update_data(property_id=callback.data.split(":")[2])
     await state.set_state(ScheduleMeeting.date)
-    await callback.message.edit_text("Дата встречи (ДД.ММ.ГГГГ):")
+    await callback.message.edit_text(i18n.t("adm_meeting_date", lang))
     await callback.answer()
 
 
 @router.message(ScheduleMeeting.date, F.text)
-async def meeting_date(message: Message, state: FSMContext) -> None:
+async def meeting_date(message: Message, state: FSMContext, lang: str) -> None:
     from bot.utils.validators import parse_date
 
     date = parse_date(message.text)
     if date is None:
-        await message.answer("Не понял дату. Формат ДД.ММ.ГГГГ.")
+        await message.answer(i18n.t("adm_bad_date", lang))
         return
     await state.update_data(date=date.isoformat())
     await state.set_state(ScheduleMeeting.time)
-    await message.answer("Время встречи (ЧЧ:ММ):")
+    await message.answer(i18n.t("adm_meeting_time", lang))
 
 
 @router.message(ScheduleMeeting.time, F.text)
-async def meeting_time(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def meeting_time(message: Message, state: FSMContext, session: AsyncSession, lang: str) -> None:
     try:
         time = dt.datetime.strptime(message.text.strip(), "%H:%M").time()
     except ValueError:
-        await message.answer("Не понял время. Формат ЧЧ:ММ, например 15:30.")
+        await message.answer(i18n.t("adm_bad_time", lang))
         return
     data = await state.get_data()
     when = dt.datetime.combine(dt.date.fromisoformat(data["date"]), time)
@@ -348,35 +385,35 @@ async def meeting_time(message: Message, state: FSMContext, session: AsyncSessio
     )
     await crud.set_client_status(session, data["client_id"], ClientStatus.showing_set)
     await state.clear()
-    await message.answer(f"✅ Встреча {meeting.id} назначена на {when.strftime('%d.%m.%Y %H:%M')}.")
+    await message.answer(i18n.t("adm_meeting_created", lang, id=meeting.id, when=when.strftime("%d.%m.%Y %H:%M")))
 
 
 # ---------------------------------------------------------------------------
 # Раздел: Публикации
 # ---------------------------------------------------------------------------
-@router.message(F.text == "📢 Публикации")
-async def publications(message: Message, session: AsyncSession) -> None:
+@router.message(F.text.in_(BTN_PUBLICATIONS))
+async def publications(message: Message, session: AsyncSession, lang: str) -> None:
     pending = await crud.list_properties(session, statuses=[PropertyStatus.pending])
     active = await crud.list_properties(session, statuses=[PropertyStatus.active])
 
     if pending:
-        await message.answer("🕒 <b>Очередь на публикацию:</b>")
+        await message.answer(i18n.t("adm_pub_queue", lang))
         for prop in pending:
-            await _show_property(message, prop, admin_kb.object_actions_kb(prop))
+            await _show_property(message, prop, admin_kb.object_actions_kb(prop, lang), lang)
     else:
-        await message.answer("Очередь на публикацию пуста.")
+        await message.answer(i18n.t("adm_pub_queue_empty", lang))
 
     if active:
-        await message.answer("📢 <b>Опубликованные:</b>")
+        await message.answer(i18n.t("adm_pub_published", lang))
         for prop in active:
-            await message.answer(format_property_card(prop), reply_markup=admin_kb.bump_kb(prop.id))
+            await message.answer(format_property_card(prop, lang), reply_markup=admin_kb.bump_kb(prop.id, lang))
 
 
 # ---------------------------------------------------------------------------
 # Раздел: Статистика
 # ---------------------------------------------------------------------------
-@router.message(F.text == "📊 Статистика")
-async def statistics(message: Message, session: AsyncSession) -> None:
+@router.message(F.text.in_(BTN_STATS))
+async def statistics(message: Message, session: AsyncSession, lang: str) -> None:
     prop_stats = await crud.count_properties_by_status(session)
     client_stats = await crud.count_clients_by_status(session)
 
@@ -385,36 +422,36 @@ async def statistics(message: Message, session: AsyncSession) -> None:
 
     total = sum(prop_stats.values())
     lines = [
-        "📊 <b>Статистика</b>",
+        i18n.t("st_title", lang),
         "",
-        f"🏠 Объектов всего: {total}",
-        f"  • активных: {prop_stats.get('active', 0)}",
-        f"  • на проверке: {prop_stats.get('pending', 0)}",
-        f"  • сдано: {prop_stats.get('rented', 0)} · продано: {prop_stats.get('sold', 0)}",
-        f"  • архив: {prop_stats.get('archived', 0)}",
+        f"{i18n.t('st_total', lang)}: {total}",
+        f"  • {i18n.t('st_active', lang)}: {prop_stats.get('active', 0)}",
+        f"  • {i18n.t('st_pending', lang)}: {prop_stats.get('pending', 0)}",
+        f"  • {i18n.t('st_sold_rented', lang)}: {prop_stats.get('rented', 0)} · {i18n.t('st_sold', lang)}: {prop_stats.get('sold', 0)}",
+        f"  • {i18n.t('st_archive', lang)}: {prop_stats.get('archived', 0)}",
         "",
-        "👥 <b>Клиенты по воронке:</b>",
-        f"  • Новый: {client_stats.get('new', 0)}",
-        f"  • Связались: {client_stats.get('contacted', 0)}",
-        f"  • Показ назначен: {client_stats.get('showing_set', 0)}",
-        f"  • Показ проведён: {client_stats.get('showing_done', 0)}",
-        f"  • Сделка: {client_stats.get('deal', 0)}",
-        f"  • Закрыт: {client_stats.get('closed', 0)}",
+        i18n.t("st_funnel", lang),
+        f"  • {i18n.t('cst_new', lang)}: {client_stats.get('new', 0)}",
+        f"  • {i18n.t('cst_contacted', lang)}: {client_stats.get('contacted', 0)}",
+        f"  • {i18n.t('cst_showing_set', lang)}: {client_stats.get('showing_set', 0)}",
+        f"  • {i18n.t('cst_showing_done', lang)}: {client_stats.get('showing_done', 0)}",
+        f"  • {i18n.t('cst_deal', lang)}: {client_stats.get('deal', 0)}",
+        f"  • {i18n.t('cst_closed', lang)}: {client_stats.get('closed', 0)}",
         "",
-        f"📢 Нужно поднять сегодня: {len(due)}",
+        f"{i18n.t('st_need_bump', lang)}: {len(due)}",
     ]
-    await message.answer("\n".join(lines), reply_markup=admin_kb.export_kb())
+    await message.answer("\n".join(lines), reply_markup=admin_kb.export_kb(lang))
 
 
 @router.callback_query(F.data.startswith(f"{P}:export:"))
-async def export_data(callback: CallbackQuery, session: AsyncSession) -> None:
+async def export_data(callback: CallbackQuery, session: AsyncSession, lang: str) -> None:
     _, _, what, fmt = callback.data.split(":")
     if what == "props":
         data, filename = await export.export_properties(session, fmt)
     else:
         data, filename = await export.export_clients(session, fmt)
     await callback.message.answer_document(BufferedInputFile(data, filename=filename))
-    await callback.answer("Готово ✅")
+    await callback.answer(i18n.t("adm_export_done", lang))
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +464,12 @@ async def _clear_markup(callback: CallbackQuery) -> None:
         pass
 
 
-async def _notify_owner(bot: Bot, prop: Property, text: str) -> None:
+async def _notify_owner(bot: Bot, session: AsyncSession, prop: Property, msg_key: str, **kwargs) -> None:
     if not prop.owner_telegram_id:
         return
+    owner = await session.get(BotUser, prop.owner_telegram_id)
+    owner_lang = owner.language if owner and owner.language else i18n.DEFAULT_LANG
     try:
-        await bot.send_message(prop.owner_telegram_id, text)
+        await bot.send_message(prop.owner_telegram_id, i18n.t(msg_key, owner_lang, **kwargs))
     except Exception:  # noqa: BLE001 - собственник мог заблокировать бота
         logger.debug("Не удалось уведомить собственника %s", prop.owner_telegram_id)

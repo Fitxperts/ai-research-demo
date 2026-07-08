@@ -266,7 +266,7 @@ async def confirm_save(
     if matches:
         await callback.message.answer(i18n.t("matches_found", lang))
         for prop in matches:
-            await callback.message.answer(format_property_card(prop))
+            await callback.message.answer(format_property_card(prop, lang))
     else:
         await callback.message.answer(i18n.t("no_matches", lang))
 
