@@ -34,7 +34,7 @@ AGENCY_CONTACTS = [
 
 # Ссылки в подвале объявления
 CHANNEL_URL = "https://t.me/fargona_UYJOY0"
-BOT_PUBLISH_URL = "https://t.me/your_bot?start=add"
+BOT_PUBLISH_URL = "https://t.me/fargona_realtor_bot?start=add"
 
 
 class Settings:
