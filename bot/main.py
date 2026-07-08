@@ -94,7 +94,8 @@ async def main() -> None:
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_my_commands(_COMMANDS)
-        await dp.start_polling(bot)
+        # polling_timeout поменьше → быстрее восстановление после сетевого блипа
+        await dp.start_polling(bot, polling_timeout=20)
     finally:
         scheduler.shutdown(wait=False)
         await storage.close()
