@@ -3,11 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import socket
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.redis import RedisStorage
@@ -18,6 +16,7 @@ from bot.handlers import register_routers
 from bot.logging_setup import init_sentry, setup_logging
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.net_session import RobustSession
 from bot.services.scheduler import setup_scheduler
 
 _COMMANDS = [
@@ -56,15 +55,12 @@ async def main() -> None:
 
     # Схема БД применяется миграциями Alembic (alembic upgrade head) до старта бота.
 
-    # Принудительно IPv4: на многих VPS IPv6-маршрут до api.telegram.org
-    # отсутствует, из-за чего getUpdates падает с ENETUNREACH / таймаутом,
-    # и бот «молчит». family=AF_INET заставляет ходить только по IPv4.
-    session = AiohttpSession()
-    session._connector_init["family"] = socket.AF_INET
-
+    # Устойчивая к «плавающей» сети сессия: только IPv4 (обход мёртвого IPv6
+    # до api.telegram.org) + таймаут установки коннекта 10 сек, чтобы сбойный
+    # маршрут отваливался быстро, а не держал бота в «молчании».
     bot = Bot(
         token=settings.bot_token,
-        session=session,
+        session=RobustSession(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
