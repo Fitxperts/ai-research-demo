@@ -15,6 +15,7 @@ from bot.config import get_settings
 from bot.handlers import register_routers
 from bot.logging_setup import init_sentry, setup_logging
 from bot.middlewares.db import DbSessionMiddleware
+from bot.middlewares.i18n import LanguageMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.net_session import RobustSession
 from bot.services.scheduler import setup_scheduler
@@ -70,6 +71,10 @@ async def main() -> None:
 
     # Прокидываем сессию БД во все хендлеры
     dp.update.middleware(DbSessionMiddleware())
+
+    # Определение языка пользователя (после сессии — читает bot_users)
+    dp.message.middleware(LanguageMiddleware())
+    dp.callback_query.middleware(LanguageMiddleware())
 
     # Антифлуд на сообщения и колбэки
     dp.message.middleware(ThrottlingMiddleware())

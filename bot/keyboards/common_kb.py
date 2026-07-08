@@ -1,4 +1,4 @@
-"""Общие клавиатуры: выбор роли и меню ролей."""
+"""Общие клавиатуры: выбор языка, выбор роли и меню ролей."""
 from __future__ import annotations
 
 from aiogram.types import (
@@ -8,31 +8,51 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from bot import i18n
 
-def role_choice_kb() -> InlineKeyboardMarkup:
+
+def language_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔎 Ищу жильё", callback_data="role:client")],
-            [InlineKeyboardButton(text="🏠 Хочу сдать/продать", callback_data="role:owner")],
+            [InlineKeyboardButton(text=label, callback_data=f"lang:{code}")]
+            for code, label in i18n.LANGUAGES.items()
         ]
     )
 
 
-def client_menu() -> ReplyKeyboardMarkup:
+def role_choice_kb(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=i18n.btn("role_client", lang), callback_data="role:client")],
+            [InlineKeyboardButton(text=i18n.btn("role_owner", lang), callback_data="role:owner")],
+        ]
+    )
+
+
+def client_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔎 Подобрать жильё")],
-            [KeyboardButton(text="↩️ Сменить роль")],
+            [KeyboardButton(text=i18n.btn("find_housing", lang))],
+            [
+                KeyboardButton(text=i18n.btn("language", lang)),
+                KeyboardButton(text=i18n.btn("change_role", lang)),
+            ],
         ],
         resize_keyboard=True,
     )
 
 
-def owner_menu() -> ReplyKeyboardMarkup:
+def owner_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Разместить объект"), KeyboardButton(text="📋 Мои объекты")],
-            [KeyboardButton(text="↩️ Сменить роль")],
+            [
+                KeyboardButton(text=i18n.btn("add_object", lang)),
+                KeyboardButton(text=i18n.btn("my_objects", lang)),
+            ],
+            [
+                KeyboardButton(text=i18n.btn("language", lang)),
+                KeyboardButton(text=i18n.btn("change_role", lang)),
+            ],
         ],
         resize_keyboard=True,
     )

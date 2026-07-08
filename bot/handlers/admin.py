@@ -71,7 +71,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
 
 @router.message(F.text == "➕ Новый объект")
 async def new_object(message: Message, state: FSMContext) -> None:
-    await begin_property_form(message, state)
+    await begin_property_form(message, state, "ru")  # админ-панель на русском
 
 
 # ---------------------------------------------------------------------------

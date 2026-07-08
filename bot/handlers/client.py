@@ -1,4 +1,4 @@
-"""Хендлеры клиента: заявка на подбор недвижимости (FSM)."""
+"""Хендлеры клиента: заявка на подбор недвижимости (FSM, мультиязычно)."""
 from __future__ import annotations
 
 import logging
@@ -15,6 +15,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import i18n
 from bot.config import get_settings
 from bot.database import crud
 from bot.database.models import ClientDealType
@@ -31,216 +32,209 @@ router = Router(name="client")
 # ---------------------------------------------------------------------------
 # Старт анкеты (вызывается из common-роутера по роли/меню)
 # ---------------------------------------------------------------------------
-async def begin_client_form(message: Message, state: FSMContext, *, full_name: str | None = None) -> None:
+async def begin_client_form(
+    message: Message, state: FSMContext, lang: str, *, full_name: str | None = None
+) -> None:
     await state.set_state(ClientForm.deal_type)
-    # full_name передаётся у реального пользователя (в callback message.from_user == бот)
-    await state.update_data(name=full_name or message.from_user.full_name)
-    await message.answer(
-        "Помогу подобрать недвижимость в Фергане.\n"
-        "Вы хотите <b>арендовать</b> или <b>купить</b>?",
-        reply_markup=client_kb.deal_type_kb(),
-    )
+    await state.update_data(name=full_name or message.from_user.full_name, lang=lang)
+    await message.answer(i18n.t("client_intro", lang), reply_markup=client_kb.deal_type_kb(lang))
 
 
 # ---------------------------------------------------------------------------
 # Шаг 1. Тип сделки
 # ---------------------------------------------------------------------------
 @router.callback_query(ClientForm.deal_type, F.data.startswith(f"{client_kb.PREFIX}:deal:"))
-async def deal_cb(callback: CallbackQuery, state: FSMContext) -> None:
+async def deal_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await state.update_data(deal_type=callback.data.split(":")[2])
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_district(callback.message, state)
+    await _ask_district(callback.message, state, lang)
     await callback.answer()
 
 
 @router.message(ClientForm.deal_type, F.text)
-async def deal_txt(message: Message, state: FSMContext) -> None:
+async def deal_txt(message: Message, state: FSMContext, lang: str) -> None:
     text = message.text.lower()
-    if any(w in text for w in ("аренд", "снять", "сним")):
+    if any(w in text for w in ("аренд", "снять", "сним", "ijara", "rent")):
         await state.update_data(deal_type=ClientDealType.rent.value)
-    elif any(w in text for w in ("покуп", "куп")):
+    elif any(w in text for w in ("покуп", "куп", "sotib", "buy")):
         await state.update_data(deal_type=ClientDealType.buy.value)
     else:
-        await message.answer("Выберите: аренда или покупка.", reply_markup=client_kb.deal_type_kb())
+        await message.answer(i18n.t("client_pick_deal", lang), reply_markup=client_kb.deal_type_kb(lang))
         return
-    await _ask_district(message, state)
+    await _ask_district(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 2. Район
 # ---------------------------------------------------------------------------
-async def _ask_district(message: Message, state: FSMContext) -> None:
+async def _ask_district(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.district)
-    await message.answer("📍 В каком районе ищете? Выберите или напишите свой:", reply_markup=client_kb.districts_kb())
+    await message.answer(i18n.t("ask_district", lang), reply_markup=client_kb.districts_kb(lang))
 
 
 @router.callback_query(ClientForm.district, F.data.startswith(f"{client_kb.PREFIX}:dist:"))
-async def district_cb(callback: CallbackQuery, state: FSMContext) -> None:
+async def district_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     district = client_kb.get_district(callback.data.split(":")[2])
     if district is None:
-        await callback.message.answer("Напишите название района текстом:")
+        await callback.message.answer(i18n.t("district_write", lang))
         await callback.answer()
         return
     await state.update_data(district=district)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_budget(callback.message, state)
+    await _ask_budget(callback.message, state, lang)
     await callback.answer()
 
 
 @router.message(ClientForm.district, F.text)
-async def district_txt(message: Message, state: FSMContext) -> None:
+async def district_txt(message: Message, state: FSMContext, lang: str) -> None:
     await state.update_data(district=message.text.strip()[:128])
-    await _ask_budget(message, state)
+    await _ask_budget(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 3. Бюджет
 # ---------------------------------------------------------------------------
-async def _ask_budget(message: Message, state: FSMContext) -> None:
+async def _ask_budget(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.budget)
-    await message.answer("💰 Какой у вас бюджет? Напишите сумму (например, 3000000):")
+    await message.answer(i18n.t("ask_budget", lang))
 
 
 @router.message(ClientForm.budget, F.text)
-async def budget_txt(message: Message, state: FSMContext) -> None:
+async def budget_txt(message: Message, state: FSMContext, lang: str) -> None:
     budget = parse_price(message.text)
     if budget is None:
-        await message.answer("Не понял сумму. Введите число, например 3000000.")
+        await message.answer(i18n.t("budget_bad", lang))
         return
     await state.update_data(budget=budget)
-    await _ask_rooms(message, state)
+    await _ask_rooms(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 4. Количество комнат
 # ---------------------------------------------------------------------------
-async def _ask_rooms(message: Message, state: FSMContext) -> None:
+async def _ask_rooms(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.rooms)
-    await message.answer("🛏 Сколько комнат нужно?", reply_markup=client_kb.rooms_kb())
+    await message.answer(i18n.t("ask_rooms", lang), reply_markup=client_kb.rooms_kb())
 
 
 @router.callback_query(ClientForm.rooms, F.data.startswith(f"{client_kb.PREFIX}:rooms:"))
-async def rooms_cb(callback: CallbackQuery, state: FSMContext) -> None:
+async def rooms_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await state.update_data(rooms=int(callback.data.split(":")[2]))
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_residents(callback.message, state)
+    await _ask_residents(callback.message, state, lang)
     await callback.answer()
 
 
 @router.message(ClientForm.rooms, F.text)
-async def rooms_txt(message: Message, state: FSMContext) -> None:
+async def rooms_txt(message: Message, state: FSMContext, lang: str) -> None:
     rooms = parse_int(message.text)
     if rooms is None:
-        await message.answer("Введите число комнат или выберите кнопкой.", reply_markup=client_kb.rooms_kb())
+        await message.answer(i18n.t("rooms_bad", lang), reply_markup=client_kb.rooms_kb())
         return
     await state.update_data(rooms=rooms)
-    await _ask_residents(message, state)
+    await _ask_residents(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 5. Состав проживающих
 # ---------------------------------------------------------------------------
-async def _ask_residents(message: Message, state: FSMContext) -> None:
+async def _ask_residents(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.residents)
-    await message.answer("👨‍👩‍👧 Кто будет жить?", reply_markup=client_kb.residents_kb())
+    await message.answer(i18n.t("ask_residents", lang), reply_markup=client_kb.residents_kb(lang))
 
 
 @router.callback_query(ClientForm.residents, F.data.startswith(f"{client_kb.PREFIX}:res:"))
-async def residents_cb(callback: CallbackQuery, state: FSMContext) -> None:
+async def residents_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     key = callback.data.split(":")[2]
-    await state.update_data(residents=client_kb.RESIDENTS.get(key, key))
+    msg_key = client_kb.RESIDENTS.get(key)
+    await state.update_data(residents=i18n.t(msg_key, lang) if msg_key else key)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_move_date(callback.message, state)
+    await _ask_move_date(callback.message, state, lang)
     await callback.answer()
 
 
 @router.message(ClientForm.residents, F.text)
-async def residents_txt(message: Message, state: FSMContext) -> None:
+async def residents_txt(message: Message, state: FSMContext, lang: str) -> None:
     await state.update_data(residents=message.text.strip()[:128])
-    await _ask_move_date(message, state)
+    await _ask_move_date(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 6. Дата заселения
 # ---------------------------------------------------------------------------
-async def _ask_move_date(message: Message, state: FSMContext) -> None:
+async def _ask_move_date(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.move_date)
-    await message.answer(
-        "📅 Когда планируете заселение? (ДД.ММ.ГГГГ)", reply_markup=client_kb.skip_date_kb()
-    )
+    await message.answer(i18n.t("ask_move_date", lang), reply_markup=client_kb.skip_date_kb(lang))
 
 
 @router.callback_query(ClientForm.move_date, F.data == f"{client_kb.PREFIX}:skipdate")
-async def skip_date_cb(callback: CallbackQuery, state: FSMContext) -> None:
+async def skip_date_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await state.update_data(move_date=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_phone(callback.message, state)
+    await _ask_phone(callback.message, state, lang)
     await callback.answer()
 
 
 @router.message(ClientForm.move_date, F.text)
-async def move_date_txt(message: Message, state: FSMContext) -> None:
+async def move_date_txt(message: Message, state: FSMContext, lang: str) -> None:
     parsed = parse_date(message.text)
     if parsed is None:
-        await message.answer(
-            "Не понял дату. Формат ДД.ММ.ГГГГ или нажмите «Пропустить».",
-            reply_markup=client_kb.skip_date_kb(),
-        )
+        await message.answer(i18n.t("date_bad", lang), reply_markup=client_kb.skip_date_kb(lang))
         return
     await state.update_data(move_date=parsed.isoformat())
-    await _ask_phone(message, state)
+    await _ask_phone(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 7. Телефон
 # ---------------------------------------------------------------------------
-async def _ask_phone(message: Message, state: FSMContext) -> None:
+async def _ask_phone(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.phone)
     kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Отправить мой номер", request_contact=True)]],
+        keyboard=[[KeyboardButton(text=i18n.btn("send_phone", lang), request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-    await message.answer("📞 Оставьте телефон для связи (или отправьте номер кнопкой):", reply_markup=kb)
+    await message.answer(i18n.t("ask_phone", lang), reply_markup=kb)
 
 
 @router.message(ClientForm.phone, F.contact)
-async def phone_contact(message: Message, state: FSMContext) -> None:
+async def phone_contact(message: Message, state: FSMContext, lang: str) -> None:
     await state.update_data(phone=message.contact.phone_number)
-    await _show_confirm(message, state)
+    await _show_confirm(message, state, lang)
 
 
 @router.message(ClientForm.phone, F.text)
-async def phone_txt(message: Message, state: FSMContext) -> None:
+async def phone_txt(message: Message, state: FSMContext, lang: str) -> None:
     if not is_valid_phone(message.text):
-        await message.answer("Похоже, номер некорректный. Введите ещё раз, например +998901234567.")
+        await message.answer(i18n.t("phone_bad", lang))
         return
     await state.update_data(phone=message.text.strip())
-    await _show_confirm(message, state)
+    await _show_confirm(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
 # Шаг 8. Подтверждение
 # ---------------------------------------------------------------------------
-async def _show_confirm(message: Message, state: FSMContext) -> None:
+async def _show_confirm(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
-    preview = _preview_card(data)
+    preview = _preview_card(data, lang)
     await state.set_state(ClientForm.confirm)
-    await message.answer("Проверьте заявку:", reply_markup=ReplyKeyboardRemove())
-    await message.answer(preview, reply_markup=client_kb.confirm_kb())
+    await message.answer(i18n.t("confirm_title", lang), reply_markup=ReplyKeyboardRemove())
+    await message.answer(preview, reply_markup=client_kb.confirm_kb(lang))
 
 
 @router.callback_query(ClientForm.confirm, F.data == f"{client_kb.PREFIX}:cancel")
-async def confirm_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+async def confirm_cancel(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await state.clear()
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Заявка отменена. Нажмите /start, чтобы начать заново.")
+    await callback.message.answer(i18n.t("request_cancelled", lang))
     await callback.answer()
 
 
 @router.callback_query(ClientForm.confirm, F.data == f"{client_kb.PREFIX}:confirm")
 async def confirm_save(
-    callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot, lang: str
 ) -> None:
     data = await state.get_data()
     move_date = data.get("move_date")
@@ -261,44 +255,43 @@ async def confirm_save(
     await state.clear()
 
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("✅ Заявка принята! Риелтор скоро свяжется с вами.")
+    await callback.message.answer(i18n.t("request_accepted", lang))
     await callback.answer()
 
-    # Уведомление администратору
+    # Уведомление администратору (на русском — панель оператора)
     await _notify_admins(bot, format_client_card(client))
 
     # Подходящие объекты
     matches = await matcher.find_for_client(session, client)
     if matches:
-        await callback.message.answer("🔎 Нашлись подходящие варианты:")
+        await callback.message.answer(i18n.t("matches_found", lang))
         for prop in matches:
             await callback.message.answer(format_property_card(prop))
     else:
-        await callback.message.answer("Пока подходящих объектов нет — сообщим, как появятся.")
+        await callback.message.answer(i18n.t("no_matches", lang))
 
     # Выбор времени для звонка
-    await callback.message.answer(
-        "🕐 Когда вам удобно, чтобы риелтор позвонил?", reply_markup=client_kb.period_kb()
-    )
+    await callback.message.answer(i18n.t("ask_call_time", lang), reply_markup=client_kb.period_kb(lang))
 
 
 # ---------------------------------------------------------------------------
 # Выбор времени звонка (после анкеты, без состояния)
 # ---------------------------------------------------------------------------
 @router.callback_query(F.data.startswith(f"{client_kb.PREFIX}:period:"))
-async def pick_period(callback: CallbackQuery) -> None:
+async def pick_period(callback: CallbackQuery, lang: str) -> None:
     period = callback.data.split(":")[2]
+    period_label = i18n.t(client_kb.PERIODS.get(period, "period_day"), lang)
     await callback.message.edit_text(
-        f"🕐 {client_kb.PERIOD_LABELS.get(period, period)} — выберите время:",
+        i18n.t("pick_time", lang, period=period_label),
         reply_markup=client_kb.slots_kb(period),
     )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith(f"{client_kb.PREFIX}:slot:"))
-async def pick_slot(callback: CallbackQuery, bot: Bot) -> None:
+async def pick_slot(callback: CallbackQuery, bot: Bot, lang: str) -> None:
     slot = callback.data.split(":", 2)[2]
-    await callback.message.edit_text(f"✅ Отлично! Риелтор позвонит вам в {slot}.")
+    await callback.message.edit_text(i18n.t("call_scheduled", lang, slot=slot))
     await callback.answer()
 
     who = escape(callback.from_user.full_name or "")
@@ -309,22 +302,23 @@ async def pick_slot(callback: CallbackQuery, bot: Bot) -> None:
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
-def _preview_card(data: dict) -> str:
+def _preview_card(data: dict, lang: str) -> str:
     def esc(value) -> str:
         return escape(str(value)) if value not in (None, "") else "—"
 
-    deal = {"rent": "Аренда", "buy": "Покупка"}.get(data.get("deal_type"), "—")
+    deal_key = "deal_rent_word" if data.get("deal_type") == "rent" else "deal_buy_word"
+    deal = i18n.t(deal_key, lang)
     budget = data.get("budget")
     budget_str = f"{int(budget):,}".replace(",", " ") + " сум" if budget else "—"
     lines = [
-        "<b>Ваша заявка</b>",
-        f"Сделка: {deal}",
-        f"Район: {esc(data.get('district'))}",
-        f"Бюджет: {budget_str}",
-        f"Комнат: {esc(data.get('rooms'))}",
-        f"Кто будет жить: {esc(data.get('residents'))}",
-        f"Заселение: {esc(data.get('move_date'))}",
-        f"Телефон: {esc(data.get('phone'))}",
+        i18n.t("preview_request", lang),
+        f"{i18n.t('preview_deal', lang)}: {deal}",
+        f"{i18n.t('preview_district', lang)}: {esc(data.get('district'))}",
+        f"{i18n.t('preview_budget', lang)}: {budget_str}",
+        f"{i18n.t('preview_rooms', lang)}: {esc(data.get('rooms'))}",
+        f"{i18n.t('preview_residents', lang)}: {esc(data.get('residents'))}",
+        f"{i18n.t('preview_move_in', lang)}: {esc(data.get('move_date'))}",
+        f"{i18n.t('preview_phone', lang)}: {esc(data.get('phone'))}",
     ]
     return "\n".join(lines)
 

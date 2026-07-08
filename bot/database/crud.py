@@ -82,6 +82,14 @@ async def set_user_role(session: AsyncSession, telegram_id: int, role: UserRole)
         await session.commit()
 
 
+async def set_language(session: AsyncSession, telegram_id: int, language: str) -> None:
+    """Сохранить выбранный пользователем язык (uz|ru|en)."""
+    user = await session.get(BotUser, telegram_id)
+    if user:
+        user.language = language
+        await session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Генерация строковых идентификаторов (APT_1001, CLT_001, MTG_001)
 # ---------------------------------------------------------------------------

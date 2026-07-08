@@ -1,7 +1,9 @@
-"""Инлайн-клавиатуры сценария клиента."""
+"""Инлайн-клавиатуры сценария клиента (мультиязычные)."""
 from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from bot import i18n
 
 PREFIX = "cl"
 
@@ -17,12 +19,12 @@ FERGANA_DISTRICTS = [
     "Ташлак",
 ]
 
-# Состав проживающих: ключ -> подпись
+# Состав проживающих: ключ -> i18n-ключ подписи
 RESIDENTS = {
-    "one": "Один",
-    "couple": "Пара",
-    "family": "Семья с детьми",
-    "students": "Студенты",
+    "one": "res_one",
+    "couple": "res_couple",
+    "family": "res_family",
+    "students": "res_students",
 }
 
 # Слоты по времени суток
@@ -31,21 +33,21 @@ TIME_SLOTS = {
     "day": ["12:00", "13:00", "14:00", "15:00"],
     "evening": ["16:00", "17:00", "18:00"],
 }
-PERIOD_LABELS = {"morning": "Утро", "day": "День", "evening": "Вечер"}
+PERIODS = {"morning": "period_morning", "day": "period_day", "evening": "period_evening"}
 
 
-def deal_type_kb() -> InlineKeyboardMarkup:
+def deal_type_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔑 Аренда", callback_data=f"{PREFIX}:deal:rent"),
-                InlineKeyboardButton(text="🏷 Покупка", callback_data=f"{PREFIX}:deal:buy"),
+                InlineKeyboardButton(text=i18n.btn("deal_rent", lang), callback_data=f"{PREFIX}:deal:rent"),
+                InlineKeyboardButton(text=i18n.btn("deal_buy", lang), callback_data=f"{PREFIX}:deal:buy"),
             ]
         ]
     )
 
 
-def districts_kb() -> InlineKeyboardMarkup:
+def districts_kb(lang: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for i in range(0, len(FERGANA_DISTRICTS), 2):
         row = [
@@ -53,7 +55,9 @@ def districts_kb() -> InlineKeyboardMarkup:
             for idx, name in enumerate(FERGANA_DISTRICTS[i : i + 2], start=i)
         ]
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="✍️ Другой район", callback_data=f"{PREFIX}:dist:other")])
+    rows.append(
+        [InlineKeyboardButton(text=i18n.btn("district_other", lang), callback_data=f"{PREFIX}:dist:other")]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -70,38 +74,40 @@ def rooms_kb() -> InlineKeyboardMarkup:
     )
 
 
-def residents_kb() -> InlineKeyboardMarkup:
+def residents_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=f"{PREFIX}:res:{key}")]
-            for key, label in RESIDENTS.items()
+            [InlineKeyboardButton(text=i18n.t(msg_key, lang), callback_data=f"{PREFIX}:res:{key}")]
+            for key, msg_key in RESIDENTS.items()
         ]
     )
 
 
-def skip_date_kb() -> InlineKeyboardMarkup:
+def skip_date_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Пропустить", callback_data=f"{PREFIX}:skipdate")]]
+        inline_keyboard=[
+            [InlineKeyboardButton(text=i18n.btn("skip", lang), callback_data=f"{PREFIX}:skipdate")]
+        ]
     )
 
 
-def confirm_kb() -> InlineKeyboardMarkup:
+def confirm_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Отправить", callback_data=f"{PREFIX}:confirm"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"{PREFIX}:cancel"),
+                InlineKeyboardButton(text=i18n.btn("confirm_send", lang), callback_data=f"{PREFIX}:confirm"),
+                InlineKeyboardButton(text=i18n.btn("cancel", lang), callback_data=f"{PREFIX}:cancel"),
             ]
         ]
     )
 
 
-def period_kb() -> InlineKeyboardMarkup:
+def period_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=label, callback_data=f"{PREFIX}:period:{key}")
-                for key, label in PERIOD_LABELS.items()
+                InlineKeyboardButton(text=i18n.t(msg_key, lang), callback_data=f"{PREFIX}:period:{key}")
+                for key, msg_key in PERIODS.items()
             ]
         ]
     )

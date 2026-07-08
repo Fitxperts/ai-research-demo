@@ -207,6 +207,7 @@ class BotUser(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.client)
     role_chosen: Mapped[bool] = mapped_column(Boolean, default=False)  # выбрал ли роль явно
+    language: Mapped[str | None] = mapped_column(String(2))  # uz | ru | en (None → ещё не выбран)
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[dt.datetime] = mapped_column(

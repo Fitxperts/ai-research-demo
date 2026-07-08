@@ -1,99 +1,102 @@
-"""Инлайн-клавиатуры сценария собственника."""
+"""Инлайн-клавиатуры сценария собственника (мультиязычные)."""
 from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot import i18n
+
 PREFIX = "ow"
 
+# key -> i18n-ключ подписи
 RENOVATION = {
-    "rough": "Черновая",
-    "cosmetic": "Косметический",
-    "euro": "Евроремонт",
-    "designer": "Дизайнерский",
+    "rough": "reno_rough",
+    "cosmetic": "reno_cosmetic",
+    "euro": "reno_euro",
+    "designer": "reno_designer",
 }
 
 
-def deal_type_kb() -> InlineKeyboardMarkup:
+def deal_type_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔑 Аренда", callback_data=f"{PREFIX}:deal:rent"),
-                InlineKeyboardButton(text="🏷 Продажа", callback_data=f"{PREFIX}:deal:sale"),
+                InlineKeyboardButton(text=i18n.t("owner_deal_rent", lang), callback_data=f"{PREFIX}:deal:rent"),
+                InlineKeyboardButton(text=i18n.t("owner_deal_sale", lang), callback_data=f"{PREFIX}:deal:sale"),
             ]
         ]
     )
 
 
-def kind_kb() -> InlineKeyboardMarkup:
+def kind_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🏢 Квартира", callback_data=f"{PREFIX}:kind:apartment"),
-                InlineKeyboardButton(text="🏡 Дом", callback_data=f"{PREFIX}:kind:house"),
+                InlineKeyboardButton(text=i18n.btn("kind_apartment", lang), callback_data=f"{PREFIX}:kind:apartment"),
+                InlineKeyboardButton(text=i18n.btn("kind_house", lang), callback_data=f"{PREFIX}:kind:house"),
             ],
             [
-                InlineKeyboardButton(text="🌳 Участок", callback_data=f"{PREFIX}:kind:land"),
-                InlineKeyboardButton(text="🏬 Коммерция", callback_data=f"{PREFIX}:kind:commercial"),
+                InlineKeyboardButton(text=i18n.btn("kind_land", lang), callback_data=f"{PREFIX}:kind:land"),
+                InlineKeyboardButton(text=i18n.btn("kind_commercial", lang), callback_data=f"{PREFIX}:kind:commercial"),
             ],
         ]
     )
 
 
-def yesno_kb() -> InlineKeyboardMarkup:
+def yesno_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Да", callback_data=f"{PREFIX}:bool:yes"),
-                InlineKeyboardButton(text="❌ Нет", callback_data=f"{PREFIX}:bool:no"),
+                InlineKeyboardButton(text="✅ " + i18n.btn("yes", lang), callback_data=f"{PREFIX}:bool:yes"),
+                InlineKeyboardButton(text="❌ " + i18n.btn("no", lang), callback_data=f"{PREFIX}:bool:no"),
             ]
         ]
     )
 
 
-def renovation_kb() -> InlineKeyboardMarkup:
+def renovation_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=f"{PREFIX}:reno:{key}")]
-            for key, label in RENOVATION.items()
+            [InlineKeyboardButton(text=i18n.t(msg_key, lang), callback_data=f"{PREFIX}:reno:{key}")]
+            for key, msg_key in RENOVATION.items()
         ]
     )
 
 
-def skip_kb() -> InlineKeyboardMarkup:
+def skip_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Пропустить", callback_data=f"{PREFIX}:skip")]]
+        inline_keyboard=[[InlineKeyboardButton(text=i18n.btn("skip", lang), callback_data=f"{PREFIX}:skip")]]
     )
 
 
-def photos_done_kb() -> InlineKeyboardMarkup:
+def photos_done_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Готово / без фото", callback_data=f"{PREFIX}:pdone")]]
+        inline_keyboard=[[InlineKeyboardButton(text=i18n.btn("done", lang), callback_data=f"{PREFIX}:pdone")]]
     )
 
 
-def video_skip_kb() -> InlineKeyboardMarkup:
+def video_skip_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Без видео", callback_data=f"{PREFIX}:novideo")]]
+        inline_keyboard=[[InlineKeyboardButton(text=i18n.btn("skip", lang), callback_data=f"{PREFIX}:novideo")]]
     )
 
 
-def confirm_kb() -> InlineKeyboardMarkup:
+def confirm_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"{PREFIX}:confirm"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"{PREFIX}:cancel"),
+                InlineKeyboardButton(text=i18n.btn("confirm_send", lang), callback_data=f"{PREFIX}:confirm"),
+                InlineKeyboardButton(text=i18n.btn("cancel", lang), callback_data=f"{PREFIX}:cancel"),
             ]
         ]
     )
 
 
-def dup_confirm_kb() -> InlineKeyboardMarkup:
+def dup_confirm_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Да, добавить", callback_data=f"{PREFIX}:dupyes"),
-                InlineKeyboardButton(text="❌ Нет", callback_data=f"{PREFIX}:dupno"),
+                InlineKeyboardButton(text="✅ " + i18n.btn("yes", lang), callback_data=f"{PREFIX}:dupyes"),
+                InlineKeyboardButton(text="❌ " + i18n.btn("no", lang), callback_data=f"{PREFIX}:dupno"),
             ]
         ]
     )
