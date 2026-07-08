@@ -7,6 +7,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BotCommand, ErrorEvent
 
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 def _register_error_handler(dp: Dispatcher, bot: Bot, settings) -> None:
     @dp.errors()
     async def on_error(event: ErrorEvent) -> bool:
+        # Сетевые таймауты/сбои связи — временные, aiogram переподключится сам.
+        # Логируем как предупреждение, но админов не спамим.
+        if isinstance(event.exception, TelegramNetworkError):
+            logger.warning("Сетевой сбой Telegram (временный): %s", event.exception)
+            return True
         logger.exception("Необработанная ошибка в хендлере", exc_info=event.exception)
         text = f"⚠️ Ошибка бота: {type(event.exception).__name__}: {event.exception}"[:1000]
         for admin_id in settings.admin_ids:
