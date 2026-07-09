@@ -40,6 +40,13 @@ _KIND_RU = {
     "land": "участок",
     "commercial": "коммерческое помещение",
 }
+# Хештег вида недвижимости для поста в канал (вместо #Фарғона)
+_KIND_HASHTAG = {
+    "apartment": "Квартира",
+    "house": "Ҳовли",
+    "land": "Ер",
+    "commercial": "Тижорат",
+}
 _DEAL_RU = {"rent": "аренду", "sale": "продажу"}
 
 _MD_SPECIALS = r"_*[]()~`>#+-=|{}.!\\"
@@ -84,15 +91,18 @@ class AIService:
         d = property_data
         em = self._emoji
         deal = d.get("deal_type") or d.get("type")
-        kind_uz = _KIND_UZ.get(d.get("property_kind"), "КВАРТИРА")
+        kind = d.get("property_kind")
+        kind_uz = _KIND_UZ.get(kind, "КВАРТИРА")
         title_deal = "ИЖАРАГА БЕРИЛАДИ" if deal == "rent" else "СОТИЛАДИ"
         tag_deal = "\\#Ижара" if deal == "rent" else "\\#Сотув"
+        tag_kind = _KIND_HASHTAG.get(kind, "Квартира")
         rooms = d.get("rooms")
 
         lines: list[str] = []
         lines.append(f"{em('🏢', 'building')} *{kind_uz} {title_deal}*")
 
-        tags = f"{tag_deal} \\#Фарғона"
+        # Хештеги: тип сделки + вид недвижимости (все объекты и так по Фергане)
+        tags = f"{tag_deal} \\#{tag_kind}"
         if rooms:
             tags += f" \\#{rooms}\\_хона"
         if d.get("urgent"):
@@ -122,17 +132,18 @@ class AIService:
         lines.append("_\\*Риэлторлик хизмати алоҳида\\._")
         lines.append("")
 
-        lines.append(f"{em('📞', 'phone')} *Мурожаат учун \\(босиб кўринг\\):*")
+        lines.append(f"{em('📞', 'phone')} *Мурожаат учун:*")
+        # Номера показываем открыто (без спойлера) — сразу видны и кликабельны.
         contacts = "\n".join(
             f"☎️ {escape_md(phone)} \\| @{escape_md(username)}"
             for phone, username in AGENCY_CONTACTS
         )
-        lines.append(f"||{contacts}||")
+        lines.append(contacts)
         lines.append("")
 
         lines.append("➖➖➖➖➖➖➖➖➖➖")
-        lines.append(f"[🏘 «Фарғона Уйлари» каналига қўшилиш]({CHANNEL_URL})")
-        lines.append(f"[📥 Бепул эълон жойлаш]({BOT_PUBLISH_URL})")
+        lines.append(f"📢 [«Фарғона Уйлари» каналига обуна бўлинг]({CHANNEL_URL})")
+        lines.append(f"📥 [Ботда бепул эълон жойлаш]({BOT_PUBLISH_URL})")
         return "\n".join(lines)
 
     @staticmethod
