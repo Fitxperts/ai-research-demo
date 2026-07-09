@@ -48,8 +48,15 @@ class Settings:
         self.database_url: str = os.environ["DATABASE_URL"]
         self.redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
-        # Anthropic
-        self.anthropic_api_key: str = os.environ["ANTHROPIC_API_KEY"]
+        # LLM (провайдеро-независимо). Приоритет:
+        #  1) LLM_BASE_URL + LLM_API_KEY → любой OpenAI-совместимый провайдер
+        #     (Groq / Google Gemini / DeepSeek / OpenRouter / OpenAI …);
+        #  2) иначе ANTHROPIC_API_KEY → Anthropic;
+        #  3) иначе — офлайн-режим (разбор регулярками, без ИИ).
+        # Всё опционально: без ключей бот работает на офлайн-заглушках.
+        self.llm_base_url: str = os.getenv("LLM_BASE_URL", "").strip()
+        self.llm_api_key: str = os.getenv("LLM_API_KEY", "").strip()
+        self.anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "").strip()
         self.ai_model: str = os.getenv("AI_MODEL", "claude-opus-4-8")
 
         # Константы (дублируем на объекте настроек для удобного доступа)

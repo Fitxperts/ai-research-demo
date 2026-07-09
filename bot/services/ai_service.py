@@ -69,12 +69,55 @@ class AIService:
         settings = get_settings()
         self._model = settings.ai_model
         self._client = None
+        self._backend: str | None = None  # "openai" | "anthropic" | None
         try:
-            from anthropic import AsyncAnthropic
+            if settings.llm_base_url:
+                # Любой OpenAI-совместимый провайдер: Groq / Gemini / DeepSeek / …
+                from openai import AsyncOpenAI
 
-            self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        except Exception:  # noqa: BLE001 - библиотека недоступна
-            logger.warning("Anthropic SDK недоступен, используются офлайн-режимы")
+                self._client = AsyncOpenAI(
+                    api_key=settings.llm_api_key or "not-needed",
+                    base_url=settings.llm_base_url,
+                )
+                self._backend = "openai"
+                logger.info("LLM: OpenAI-совместимый провайдер, модель %s", self._model)
+            elif settings.anthropic_api_key:
+                from anthropic import AsyncAnthropic
+
+                self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+                self._backend = "anthropic"
+                logger.info("LLM: Anthropic, модель %s", self._model)
+            else:
+                logger.warning("LLM не настроен — офлайн-режим (разбор регулярками)")
+        except Exception:  # noqa: BLE001 - библиотека/сеть недоступны
+            logger.warning("LLM SDK недоступен, используются офлайн-режимы")
+            self._client = None
+            self._backend = None
+
+    async def _chat(self, prompt: str, *, system: str | None = None, max_tokens: int = 500) -> str | None:
+        """Единый вызов LLM независимо от провайдера. None — если ИИ недоступен/ошибка."""
+        if self._client is None:
+            return None
+        try:
+            if self._backend == "openai":
+                messages = []
+                if system:
+                    messages.append({"role": "system", "content": system})
+                messages.append({"role": "user", "content": prompt})
+                resp = await self._client.chat.completions.create(
+                    model=self._model, max_tokens=max_tokens, messages=messages,
+                )
+                return (resp.choices[0].message.content or "").strip()
+            # anthropic
+            kwargs = {"model": self._model, "max_tokens": max_tokens,
+                      "messages": [{"role": "user", "content": prompt}]}
+            if system:
+                kwargs["system"] = system
+            resp = await self._client.messages.create(**kwargs)
+            return "".join(getattr(b, "text", "") for b in resp.content).strip()
+        except Exception:  # noqa: BLE001 - сеть/лимиты/битый ответ → уходим в офлайн
+            logger.exception("Ошибка вызова LLM")
+            return None
 
     # ------------------------------------------------------------------
     # 1. Готовое объявление (строгий формат, MarkdownV2)
@@ -204,18 +247,14 @@ class AIService:
             "ссылок, без мусорных эмодзи и без лишней рекламы.\n"
             "Отсутствующие поля — null. Верни ТОЛЬКО JSON.\n\nОбъявление:\n" + text
         )
-        try:
-            response = await self._client.messages.create(
-                model=self._model,
-                max_tokens=800,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = "".join(getattr(b, "text", "") for b in response.content)
+        raw = await self._chat(prompt, max_tokens=800)
+        if raw:
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
-                return self._normalize_listing(json.loads(match.group()))
-        except Exception:  # noqa: BLE001
-            logger.exception("Ошибка разбора объявления через ИИ")
+                try:
+                    return self._normalize_listing(json.loads(match.group()))
+                except (ValueError, TypeError):
+                    logger.warning("ИИ вернул невалидный JSON при разборе объявления")
         return {}
 
     def _listing_offline(self, text: str) -> dict:
@@ -259,19 +298,15 @@ class AIService:
             "(int), district (str), price (число), phone (str). Отсутствующее — null. "
             "Верни только JSON.\n\nТекст: " + text
         )
-        try:
-            response = await self._client.messages.create(
-                model=self._model,
-                max_tokens=300,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = "".join(getattr(b, "text", "") for b in response.content)
+        raw = await self._chat(prompt, max_tokens=300)
+        if raw:
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
-                data = json.loads(match.group())
-                return {k: v for k, v in data.items() if v is not None}
-        except Exception:  # noqa: BLE001
-            logger.exception("Ошибка разбора текста через ИИ")
+                try:
+                    data = json.loads(match.group())
+                    return {k: v for k, v in data.items() if v is not None}
+                except (ValueError, TypeError):
+                    logger.warning("ИИ вернул невалидный JSON при разборе текста")
         return {}
 
     # Стоп-слова (префиксы) для отсева служебных слов при поиске района.
@@ -395,23 +430,15 @@ class AIService:
     # Короткое описание (для карточек в боте)
     # ------------------------------------------------------------------
     async def generate_short_description(self, data: dict) -> str:
-        if self._client is None:
-            return self._short_fallback(data)
-        try:
-            response = await self._client.messages.create(
-                model=self._model,
-                max_tokens=300,
-                system=(
-                    "Ты риелтор. Составь короткое привлекательное описание объекта "
-                    "на русском (2-3 предложения) по данным, без выдумок."
-                ),
-                messages=[{"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
-            )
-            text = "".join(getattr(b, "text", "") for b in response.content).strip()
-            return text or self._short_fallback(data)
-        except Exception:  # noqa: BLE001
-            logger.exception("Ошибка генерации короткого описания")
-            return self._short_fallback(data)
+        text = await self._chat(
+            json.dumps(data, ensure_ascii=False),
+            system=(
+                "Ты риелтор. Составь короткое привлекательное описание объекта "
+                "на русском (2-3 предложения) по данным, без выдумок."
+            ),
+            max_tokens=300,
+        )
+        return text or self._short_fallback(data)
 
     @staticmethod
     def _short_fallback(data: dict) -> str:
