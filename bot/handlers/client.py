@@ -23,7 +23,7 @@ from bot.keyboards import client_kb
 from bot.services import matcher
 from bot.states.client_states import ClientForm
 from bot.utils.formatters import format_client_card, format_property_card
-from bot.utils.validators import is_valid_phone, parse_date, parse_int, parse_price
+from bot.utils.validators import is_valid_phone, parse_date, parse_price
 
 logger = logging.getLogger(__name__)
 router = Router(name="client")
@@ -106,37 +106,12 @@ async def budget_txt(message: Message, state: FSMContext, lang: str) -> None:
         await message.answer(i18n.t("budget_bad", lang))
         return
     await state.update_data(budget=budget)
-    await _ask_rooms(message, state, lang)
-
-
-# ---------------------------------------------------------------------------
-# Шаг 4. Количество комнат
-# ---------------------------------------------------------------------------
-async def _ask_rooms(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(ClientForm.rooms)
-    await message.answer(i18n.t("ask_rooms", lang), reply_markup=client_kb.rooms_kb())
-
-
-@router.callback_query(ClientForm.rooms, F.data.startswith(f"{client_kb.PREFIX}:rooms:"))
-async def rooms_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    await state.update_data(rooms=int(callback.data.split(":")[2]))
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_residents(callback.message, state, lang)
-    await callback.answer()
-
-
-@router.message(ClientForm.rooms, F.text)
-async def rooms_txt(message: Message, state: FSMContext, lang: str) -> None:
-    rooms = parse_int(message.text)
-    if rooms is None:
-        await message.answer(i18n.t("rooms_bad", lang), reply_markup=client_kb.rooms_kb())
-        return
-    await state.update_data(rooms=rooms)
     await _ask_residents(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
-# Шаг 5. Состав проживающих
+# Шаг 4. Состав проживающих (вопрос про комнаты убран — в группе объекты
+# одного типажа, лишний вопрос ни к чему)
 # ---------------------------------------------------------------------------
 async def _ask_residents(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.residents)
@@ -246,7 +221,6 @@ async def confirm_save(
         phone=data.get("phone"),
         deal_type=ClientDealType(data["deal_type"]),
         district=data.get("district"),
-        rooms=data.get("rooms"),
         budget=data.get("budget"),
         currency="сум",
         residents=data.get("residents"),
@@ -315,7 +289,6 @@ def _preview_card(data: dict, lang: str) -> str:
         f"{i18n.t('preview_deal', lang)}: {deal}",
         f"{i18n.t('preview_district', lang)}: {esc(data.get('district'))}",
         f"{i18n.t('preview_budget', lang)}: {budget_str}",
-        f"{i18n.t('preview_rooms', lang)}: {esc(data.get('rooms'))}",
         f"{i18n.t('preview_residents', lang)}: {esc(data.get('residents'))}",
         f"{i18n.t('preview_move_in', lang)}: {esc(data.get('move_date'))}",
         f"{i18n.t('preview_phone', lang)}: {esc(data.get('phone'))}",

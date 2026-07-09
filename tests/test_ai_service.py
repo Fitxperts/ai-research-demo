@@ -46,6 +46,19 @@ def test_parse_free_text_phone_not_price():
     assert parsed["price"] == 450000.0  # телефон не спутан с ценой
 
 
+def test_parse_listing_offline_spaced_price_and_phone():
+    svc = get_ai_service()
+    parsed = svc._listing_offline(
+        "Продаётся 3-комн. квартира, центр, 5/9, 78 м2. Цена 65 000 000 сум. Тел: +998901234567"
+    )
+    assert parsed["phone"] == "+998901234567"      # цена не принята за телефон
+    assert parsed["price"] == 65000000.0           # разряды через пробел учтены
+    assert parsed["rooms"] == 3
+    assert parsed["deal_type"] == "sale"
+    assert parsed["description"]                    # описание есть
+    assert "+998901234567" not in parsed["description"]  # телефон убран из описания
+
+
 def test_find_matches_budget_and_filters():
     svc = get_ai_service()
     client = {"deal_type": "rent", "budget": 2500000, "district": "центр", "rooms": 2}

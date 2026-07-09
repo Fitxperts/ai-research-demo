@@ -158,6 +158,89 @@ class AIService:
                 return parsed
         return self._parse_regex(text)
 
+    # ------------------------------------------------------------------
+    # 2b. Разбор ПОЛНОГО объявления (своего или готового от партнёра)
+    # ------------------------------------------------------------------
+    _LISTING_KEYS = (
+        "deal_type", "property_kind", "rooms", "district", "address",
+        "area", "floor", "floors", "price", "phone", "description",
+    )
+
+    async def parse_listing(self, text: str) -> dict:
+        """Разобрать длинное объявление в структуру + причесать описание.
+
+        Основной путь размещения: пользователь присылает одно сообщение
+        (своё или готовое объявление партнёра), бот сам извлекает поля и
+        оформляет. При недоступности ИИ — офлайн-разбор регулярками.
+        """
+        if self._client is not None:
+            data = await self._listing_with_ai(text)
+            if data:
+                return data
+        return self._listing_offline(text)
+
+    async def _listing_with_ai(self, text: str) -> dict:
+        prompt = (
+            "Ты помощник риелторского агентства в Фергане. Из объявления о "
+            "недвижимости извлеки данные в JSON со строго такими полями:\n"
+            "deal_type (rent — аренда/ижара, sale — продажа/сотув),\n"
+            "property_kind (apartment, house, land, commercial),\n"
+            "rooms (целое), district (район/массив, строка), address (строка),\n"
+            "area (число, м²), floor (этаж, целое), floors (этажность, целое),\n"
+            "price (число без пробелов и валюты), phone (строка),\n"
+            "description — короткое аккуратное описание объекта в едином деловом "
+            "стиле агентства на русском (2–4 предложения), без телефонов, без "
+            "ссылок, без мусорных эмодзи и без лишней рекламы.\n"
+            "Отсутствующие поля — null. Верни ТОЛЬКО JSON.\n\nОбъявление:\n" + text
+        )
+        try:
+            response = await self._client.messages.create(
+                model=self._model,
+                max_tokens=800,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = "".join(getattr(b, "text", "") for b in response.content)
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                return self._normalize_listing(json.loads(match.group()))
+        except Exception:  # noqa: BLE001
+            logger.exception("Ошибка разбора объявления через ИИ")
+        return {}
+
+    def _listing_offline(self, text: str) -> dict:
+        data = self._parse_regex(text)
+        data["description"] = self._clean_description(text, data.get("phone"))
+        return data
+
+    @classmethod
+    def _normalize_listing(cls, data: dict) -> dict:
+        result: dict = {}
+        for key in cls._LISTING_KEYS:
+            value = data.get(key)
+            if value in (None, "", "null"):
+                continue
+            if key in ("rooms", "floor", "floors"):
+                try:
+                    result[key] = int(value)
+                except (TypeError, ValueError):
+                    continue
+            elif key in ("area", "price"):
+                try:
+                    result[key] = float(str(value).replace(" ", "").replace(",", "."))
+                except (TypeError, ValueError):
+                    continue
+            else:
+                result[key] = str(value).strip()
+        return result
+
+    @staticmethod
+    def _clean_description(text: str, phone: str | None) -> str:
+        cleaned = text
+        if phone:
+            cleaned = cleaned.replace(phone, " ")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:800]
+
     async def _parse_with_ai(self, text: str) -> dict:
         prompt = (
             "Разбери объявление о недвижимости в JSON с полями: deal_type "
@@ -187,6 +270,7 @@ class AIService:
         "аренд", "ижара", "сдам", "сдается", "сдаётся", "продаж", "сотув",
         "продам", "сотилади", "хозяин", "срочно", "комн", "хона", "сум", "сўм",
         "дом", "квартира", "участок", "коммерч", "тижорат", "офис", "этаж", "кв",
+        "прода", "сдаё", "сдаю", "куп", "торг", "цена", "тел",
         # UZ (latin)
         "ijara", "sotuv", "sotil", "sotaman", "kvartira", "hovli", "uchastka",
         "xona", "xonali", "egasi", "shoshilinch", "som", "sum", "uy", "yer",
@@ -201,16 +285,19 @@ class AIService:
         ("land", ("участок", "ер", "uchastka", "yer", "land")),
         ("commercial", ("коммерч", "тижорат", "офис", "tijorat", "ofis", "commercial")),
     )
-    _RENT_WORDS = ("аренд", "ижара", "сдам", "сдаётся", "сдается", "ijara", "rent")
-    _SALE_WORDS = ("продаж", "сотув", "продам", "сотилади", "сотиш", "sotuv",
-                   "sotiladi", "sotaman", "sotil", "sale")
+    _RENT_WORDS = ("аренд", "ижара", "сдам", "сдаё", "сдаю", "сдается", "ижарага",
+                   "ijara", "rent")
+    _SALE_WORDS = ("прода", "сотув", "сотил", "сотиш", "sotuv", "sotil",
+                   "sotaman", "sale")
 
     @classmethod
     def _parse_regex(cls, text: str) -> dict:
         result: dict = {}
 
-        # Телефон — извлекаем и убираем из текста, чтобы не спутать с ценой
-        phone = re.search(r"\+?\d[\d\s\-()]{7,}\d", text)
+        # Телефон — сначала номер с «+» (допускаем пробелы/скобки), иначе
+        # непрерывная последовательность 9–12 цифр. Так цену «65 000 000»
+        # (разбита пробелами по 3) не примем за телефон.
+        phone = re.search(r"\+\d[\d\s\-()]{7,}\d", text) or re.search(r"(?<!\d)\d{9,12}(?!\d)", text)
         work = text
         if phone:
             result["phone"] = phone.group().strip()
@@ -234,8 +321,12 @@ class AIService:
         if rooms:
             result["rooms"] = int(rooms.group(1))
 
-        # Цена: наибольшее «нетелефонное» число
-        numbers = [int(n) for n in re.findall(r"\d+", low) if len(n) <= 9]
+        # Цена: наибольшее число, учитывая разряды через пробел («65 000 000»)
+        numbers: list[int] = []
+        for group in re.findall(r"\d[\d ]*\d|\d", low):
+            digits = group.replace(" ", "")
+            if digits.isdigit() and len(digits) <= 12:
+                numbers.append(int(digits))
         if numbers:
             result["price"] = float(max(numbers))
 

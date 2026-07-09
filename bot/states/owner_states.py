@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class OwnerForm(StatesGroup):
+    raw = State()            # объявление одним сообщением (осн. путь)
     deal_type = State()      # аренда или продажа
     property_kind = State()  # квартира/дом/участок/коммерция
     address = State()        # адрес

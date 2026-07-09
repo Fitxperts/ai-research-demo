@@ -1,4 +1,10 @@
-"""Хендлеры собственника: размещение объекта недвижимости (FSM, мультиязычно)."""
+"""Хендлеры собственника: размещение объекта одним сообщением (осн. путь).
+
+Логика: пользователь присылает объявление целиком (своё или готовое от
+партнёра) — ИИ разбирает поля и оформляет описание в стиле агентства.
+Вручную бот спрашивает ТОЛЬКО то, что не удалось распознать и что критично
+для публикации: тип сделки, цену, телефон. Затем фото и подтверждение.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -26,25 +32,28 @@ from bot.services import duplicate_checker
 from bot.services.ai_service import get_ai_service
 from bot.states.owner_states import OwnerForm
 from bot.utils.formatters import format_property_brief, format_property_card
-from bot.utils.validators import is_valid_phone, parse_int, parse_price
+from bot.utils.validators import is_valid_phone, parse_price
 
 logger = logging.getLogger(__name__)
 router = Router(name="owner")
 P = owner_kb.PREFIX
 
-# Сериализация записи фото в FSM (фото альбома приходят как конкурентные апдейты).
+# Сериализация записи фото в FSM (фото альбома приходят конкурентно).
 _photo_lock = asyncio.Lock()
 
+# Поля, которые переносим из разбора объявления в состояние
+_LISTING_FIELDS = ("deal_type", "property_kind", "rooms", "district", "address",
+                   "area", "floor", "floors", "description")
+
 
 # ---------------------------------------------------------------------------
-# Вход
+# Вход: просим прислать объявление одним сообщением
 # ---------------------------------------------------------------------------
 async def begin_property_form(message: Message, state: FSMContext, lang: str) -> None:
-    """Начать анкету размещения объекта (используется и админом)."""
     await state.clear()
-    await state.set_state(OwnerForm.deal_type)
+    await state.set_state(OwnerForm.raw)
     await state.update_data(lang=lang)
-    await message.answer(i18n.t("owner_intro", lang), reply_markup=owner_kb.deal_type_kb(lang))
+    await message.answer(i18n.t("owner_intro", lang))
 
 
 @router.message(Command("add"))
@@ -62,227 +71,76 @@ async def cmd_add(message: Message, state: FSMContext, session: AsyncSession, la
 
 
 # ---------------------------------------------------------------------------
-# Тип сделки → вид объекта → адрес → район
+# Разбор объявления (текст или фото с подписью)
 # ---------------------------------------------------------------------------
+@router.message(OwnerForm.raw, F.text)
+async def listing_text(message: Message, state: FSMContext, lang: str) -> None:
+    await _handle_listing(message, state, lang, message.text)
+
+
+@router.message(OwnerForm.raw, F.photo)
+async def listing_photo(message: Message, state: FSMContext, lang: str) -> None:
+    async with _photo_lock:
+        data = await state.get_data()
+        photos: list[str] = data.get("photos", [])
+        photos.append(message.photo[-1].file_id)
+        await state.update_data(photos=photos)
+    caption = (message.caption or "").strip()
+    if caption:
+        await _handle_listing(message, state, lang, caption)
+    else:
+        # Фото без подписи: ждём текст объявления (просим один раз).
+        data = await state.get_data()
+        if not data.get("_asked_text"):
+            await state.update_data(_asked_text=True)
+            await message.answer(i18n.t("owner_send_text", lang))
+
+
+async def _handle_listing(message: Message, state: FSMContext, lang: str, text: str) -> None:
+    parsed = await get_ai_service().parse_listing(text)
+    # комнаты есть, а вид не распознан → по умолчанию квартира
+    if parsed.get("rooms") and not parsed.get("property_kind"):
+        parsed["property_kind"] = "apartment"
+
+    update = {k: parsed[k] for k in _LISTING_FIELDS if parsed.get(k) is not None}
+    if parsed.get("price") is not None:
+        update["price"] = parsed["price"]
+    if parsed.get("phone"):
+        update["owner_phone"] = parsed["phone"]
+    await state.update_data(**update)
+
+    await message.answer(i18n.t("owner_quick_ok", lang))
+    await _route_missing(message, state, lang)
+
+
+# ---------------------------------------------------------------------------
+# Дозапрос только недостающего критичного: сделка → цена → телефон → фото
+# ---------------------------------------------------------------------------
+async def _route_missing(message: Message, state: FSMContext, lang: str) -> None:
+    data = await state.get_data()
+    if not data.get("deal_type"):
+        await state.set_state(OwnerForm.deal_type)
+        await message.answer(i18n.t("owner_need_deal", lang), reply_markup=owner_kb.deal_type_kb(lang))
+        return
+    if not data.get("property_kind"):
+        await state.update_data(property_kind="apartment")  # тип по умолчанию, не спрашиваем
+    if data.get("price") is None:
+        await state.set_state(OwnerForm.price)
+        await message.answer(i18n.t("owner_need_price", lang))
+        return
+    if not data.get("owner_phone"):
+        await state.set_state(OwnerForm.phone)
+        await message.answer(i18n.t("owner_ask_phone", lang))
+        return
+    await _ask_photos(message, state, lang)
+
+
 @router.callback_query(OwnerForm.deal_type, F.data.startswith(f"{P}:deal:"))
 async def deal_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await state.update_data(deal_type=callback.data.split(":")[2])
-    await state.set_state(OwnerForm.property_kind)
-    await callback.message.edit_text(i18n.t("owner_kind_q", lang), reply_markup=owner_kb.kind_kb(lang))
-    await callback.answer()
-
-
-@router.message(OwnerForm.deal_type, F.text)
-async def quick_add(message: Message, state: FSMContext, lang: str) -> None:
-    """Быстрое добавление: собственник прислал всё одним сообщением."""
-    parsed = await get_ai_service().parse_free_text(message.text)
-    if parsed.get("rooms") and "property_kind" not in parsed:
-        parsed["property_kind"] = "apartment"
-
-    if not {"deal_type", "property_kind", "price"} <= parsed.keys():
-        await message.answer(i18n.t("owner_quick_fail", lang), reply_markup=owner_kb.deal_type_kb(lang))
-        return
-
-    await state.update_data(
-        deal_type=parsed["deal_type"],
-        property_kind=parsed["property_kind"],
-        price=parsed["price"],
-        rooms=parsed.get("rooms"),
-        district=parsed.get("district"),
-        owner_phone=parsed.get("phone"),
-    )
-    await message.answer(i18n.t("owner_quick_ok", lang))
-    await _show_confirm(message, state, lang)
-
-
-@router.callback_query(OwnerForm.property_kind, F.data.startswith(f"{P}:kind:"))
-async def kind_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    await state.update_data(property_kind=callback.data.split(":")[2])
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_address(callback.message, state, lang)
+    await _route_missing(callback.message, state, lang)
     await callback.answer()
-
-
-async def _ask_address(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.address)
-    await message.answer(i18n.t("ask_address", lang))
-
-
-@router.message(OwnerForm.address, F.text)
-async def address_txt(message: Message, state: FSMContext, lang: str) -> None:
-    await state.update_data(address=message.text.strip()[:255])
-    await state.set_state(OwnerForm.district)
-    await message.answer(i18n.t("ask_owner_district", lang))
-
-
-@router.message(OwnerForm.district, F.text)
-async def district_txt(message: Message, state: FSMContext, lang: str) -> None:
-    await state.update_data(district=message.text.strip()[:128])
-    await _ask_rooms(message, state, lang)
-
-
-# ---------------------------------------------------------------------------
-# Числовые поля: комнаты → площадь → этаж → этажность
-# ---------------------------------------------------------------------------
-async def _ask_rooms(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.rooms)
-    await message.answer(i18n.t("owner_ask_rooms", lang), reply_markup=owner_kb.skip_kb(lang))
-
-
-@router.message(OwnerForm.rooms, F.text)
-async def rooms_txt(message: Message, state: FSMContext, lang: str) -> None:
-    value = parse_int(message.text)
-    if value is None:
-        await message.answer(i18n.t("num_bad", lang), reply_markup=owner_kb.skip_kb(lang))
-        return
-    await state.update_data(rooms=value)
-    await _ask_area(message, state, lang)
-
-
-async def _ask_area(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.area)
-    await message.answer(i18n.t("ask_area", lang), reply_markup=owner_kb.skip_kb(lang))
-
-
-@router.message(OwnerForm.area, F.text)
-async def area_txt(message: Message, state: FSMContext, lang: str) -> None:
-    value = parse_price(message.text)
-    if value is None:
-        await message.answer(i18n.t("area_bad", lang), reply_markup=owner_kb.skip_kb(lang))
-        return
-    await state.update_data(area=value)
-    await _ask_floor(message, state, lang)
-
-
-async def _ask_floor(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.floor)
-    await message.answer(i18n.t("ask_floor", lang), reply_markup=owner_kb.skip_kb(lang))
-
-
-@router.message(OwnerForm.floor, F.text)
-async def floor_txt(message: Message, state: FSMContext, lang: str) -> None:
-    value = parse_int(message.text)
-    if value is None:
-        await message.answer(i18n.t("num_bad", lang), reply_markup=owner_kb.skip_kb(lang))
-        return
-    await state.update_data(floor=value)
-    await _ask_floors(message, state, lang)
-
-
-async def _ask_floors(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.floors)
-    await message.answer(i18n.t("ask_floors", lang), reply_markup=owner_kb.skip_kb(lang))
-
-
-@router.message(OwnerForm.floors, F.text)
-async def floors_txt(message: Message, state: FSMContext, lang: str) -> None:
-    value = parse_int(message.text)
-    if value is None:
-        await message.answer(i18n.t("num_bad", lang), reply_markup=owner_kb.skip_kb(lang))
-        return
-    await state.update_data(floors=value)
-    await _ask_renovation(message, state, lang)
-
-
-# ---------------------------------------------------------------------------
-# Ремонт
-# ---------------------------------------------------------------------------
-async def _ask_renovation(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.renovation)
-    await message.answer(i18n.t("ask_renovation", lang), reply_markup=owner_kb.renovation_kb(lang))
-
-
-@router.callback_query(OwnerForm.renovation, F.data.startswith(f"{P}:reno:"))
-async def reno_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    key = callback.data.split(":")[2]
-    msg_key = owner_kb.RENOVATION.get(key)
-    await state.update_data(renovation=i18n.t(msg_key, lang) if msg_key else key)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_furniture(callback.message, state, lang)
-    await callback.answer()
-
-
-@router.message(OwnerForm.renovation, F.text)
-async def reno_txt(message: Message, state: FSMContext, lang: str) -> None:
-    await state.update_data(renovation=message.text.strip()[:128])
-    await _ask_furniture(message, state, lang)
-
-
-# ---------------------------------------------------------------------------
-# Булевы поля (Да/Нет)
-# ---------------------------------------------------------------------------
-async def _ask_bool(message: Message, state: FSMContext, target, msg_key: str, lang: str) -> None:
-    await state.set_state(target)
-    await message.answer(i18n.t(msg_key, lang), reply_markup=owner_kb.yesno_kb(lang))
-
-
-async def _ask_furniture(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.furniture, "ask_furniture", lang)
-
-
-async def _ask_appliances(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.appliances, "ask_appliances", lang)
-
-
-async def _ask_gas(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.gas, "ask_gas", lang)
-
-
-async def _ask_water(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.water, "ask_water", lang)
-
-
-async def _ask_electricity(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.electricity, "ask_electricity", lang)
-
-
-async def _ask_internet(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.internet, "ask_internet", lang)
-
-
-async def _ask_docs(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.docs, "ask_docs", lang)
-
-
-async def _ask_mortgage(m: Message, s: FSMContext, lang: str) -> None:
-    await _ask_bool(m, s, OwnerForm.mortgage, "ask_mortgage", lang)
-
-
-# Карта: текущее булево состояние -> (поле модели, следующий вопрос)
-_BOOL_FLOW = {
-    OwnerForm.furniture: ("furniture", _ask_appliances),
-    OwnerForm.appliances: ("appliances", _ask_gas),
-    OwnerForm.gas: ("gas", _ask_water),
-    OwnerForm.water: ("water", _ask_electricity),
-    OwnerForm.electricity: ("electricity", _ask_internet),
-    OwnerForm.internet: ("internet", _ask_docs),
-    OwnerForm.docs: ("docs", _ask_mortgage),
-    OwnerForm.mortgage: ("mortgage", None),  # None → перейти к цене
-}
-
-
-async def _bool_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    current = await state.get_state()
-    pair = next((p for st, p in _BOOL_FLOW.items() if st.state == current), None)
-    if pair is None:
-        await callback.answer()
-        return
-    field, nxt = pair
-    await state.update_data(**{field: callback.data.split(":")[2] == "yes"})
-    await callback.message.edit_reply_markup(reply_markup=None)
-    if nxt is None:
-        await _ask_price(callback.message, state, lang)
-    else:
-        await nxt(callback.message, state, lang)
-    await callback.answer()
-
-
-# ---------------------------------------------------------------------------
-# Цена → торг → телефон
-# ---------------------------------------------------------------------------
-async def _ask_price(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.price)
-    await message.answer(i18n.t("ask_price", lang))
 
 
 @router.message(OwnerForm.price, F.text)
@@ -292,20 +150,7 @@ async def price_txt(message: Message, state: FSMContext, lang: str) -> None:
         await message.answer(i18n.t("price_bad", lang))
         return
     await state.update_data(price=value)
-    await _ask_bool(message, state, OwnerForm.negotiable, "ask_negotiable", lang)
-
-
-@router.callback_query(OwnerForm.negotiable, F.data.startswith(f"{P}:bool:"))
-async def negotiable_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    await state.update_data(negotiable=callback.data.split(":")[2] == "yes")
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_phone(callback.message, state, lang)
-    await callback.answer()
-
-
-async def _ask_phone(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.phone)
-    await message.answer(i18n.t("owner_ask_phone", lang))
+    await _route_missing(message, state, lang)
 
 
 @router.message(OwnerForm.phone, F.text)
@@ -314,11 +159,11 @@ async def phone_txt(message: Message, state: FSMContext, lang: str) -> None:
         await message.answer(i18n.t("owner_phone_bad", lang))
         return
     await state.update_data(owner_phone=message.text.strip())
-    await _ask_photos(message, state, lang)
+    await _route_missing(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
-# Фото (несколько) → видео (опционально)
+# Фото → видео (опционально) → подтверждение
 # ---------------------------------------------------------------------------
 async def _ask_photos(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(OwnerForm.photos)
@@ -358,26 +203,6 @@ async def collect_video(message: Message, state: FSMContext, lang: str) -> None:
 async def skip_video(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await callback.message.edit_reply_markup(reply_markup=None)
     await _show_confirm(callback.message, state, lang)
-    await callback.answer()
-
-
-# ---------------------------------------------------------------------------
-# Пропуск числовых полей
-# ---------------------------------------------------------------------------
-_SKIP_NEXT = {
-    OwnerForm.rooms.state: _ask_area,
-    OwnerForm.area.state: _ask_floor,
-    OwnerForm.floor.state: _ask_floors,
-    OwnerForm.floors.state: _ask_renovation,
-}
-
-
-@router.callback_query(F.data == f"{P}:skip")
-async def skip_numeric(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    nxt = _SKIP_NEXT.get(await state.get_state())
-    if nxt:
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await nxt(callback.message, state, lang)
     await callback.answer()
 
 
@@ -440,12 +265,13 @@ async def _save_property(
 ) -> None:
     data = await state.get_data()
 
-    description = await get_ai_service().generate_short_description(data)
+    # Описание: причёсанное ИИ из объявления; иначе — офлайн-фолбэк.
+    description = data.get("description") or await get_ai_service().generate_short_description(data)
 
     photos = data.get("photos", [])
     prop = await crud.create_property(
         session,
-        property_kind=PropertyKind(data["property_kind"]),
+        property_kind=PropertyKind(data.get("property_kind", "apartment")),
         type=PropertyType(data["deal_type"]),
         status=PropertyStatus.pending,
         owner_name=callback.from_user.full_name,
@@ -458,17 +284,8 @@ async def _save_property(
         floor=data.get("floor"),
         floors=data.get("floors"),
         renovation=data.get("renovation"),
-        furniture=bool(data.get("furniture")),
-        appliances=bool(data.get("appliances")),
-        gas=bool(data.get("gas")),
-        water=bool(data.get("water")),
-        electricity=bool(data.get("electricity")),
-        internet=bool(data.get("internet")),
-        docs=bool(data.get("docs")),
-        mortgage=bool(data.get("mortgage")),
         price=data.get("price"),
         currency="сум",
-        negotiable=bool(data.get("negotiable")),
         description=description,
         photos=",".join(photos),
         video=data.get("video"),
@@ -489,7 +306,7 @@ def _build_preview(data: dict) -> Property:
     return Property(
         id="—",
         type=PropertyType(data["deal_type"]),
-        property_kind=PropertyKind(data["property_kind"]),
+        property_kind=PropertyKind(data.get("property_kind", "apartment")),
         owner_phone=data.get("owner_phone"),
         district=data.get("district"),
         address=data.get("address"),
@@ -498,15 +315,9 @@ def _build_preview(data: dict) -> Property:
         floor=data.get("floor"),
         floors=data.get("floors"),
         renovation=data.get("renovation"),
-        furniture=bool(data.get("furniture")),
-        appliances=bool(data.get("appliances")),
-        gas=bool(data.get("gas")),
-        water=bool(data.get("water")),
-        electricity=bool(data.get("electricity")),
-        internet=bool(data.get("internet")),
         price=data.get("price"),
         currency="сум",
-        negotiable=bool(data.get("negotiable")),
+        description=data.get("description"),
     )
 
 
@@ -530,8 +341,3 @@ async def _notify_admins(bot: Bot, prop: Property) -> None:
                 await bot.send_message(admin_id, text, reply_markup=kb)
         except Exception:  # noqa: BLE001 - админ мог не запускать бота
             logger.debug("Не удалось уведомить админа %s", admin_id)
-
-
-# Регистрация обобщённых Да/Нет обработчиков для булевых состояний
-for _state in _BOOL_FLOW:
-    router.callback_query.register(_bool_cb, _state, F.data.startswith(f"{P}:bool:"))

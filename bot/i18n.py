@@ -342,20 +342,48 @@ MESSAGES: dict[str, dict[str, str]] = {
     # --- Собственник ---
     "owner_intro": {
         "uz": (
-            "🏠 Obyektni joylaymiz. Bitim turini tanlang —\n"
-            "<i>yoki obyektni bitta xabarda yozing, masalan:</i>\n"
-            "<code>2x margʻilon 450000 sotuv egasi +998901234567</code>"
+            "🏠 <b>Obyekt joylash.</b>\n"
+            "Eʼlonni <b>bitta xabarda</b> yuboring — oʻzingizniki yoki hamkasbingizdan "
+            "tayyor eʼlonni. Men oʻzim maʼlumotlarni ajratib, agentlik uslubida "
+            "rasmiylashtiraman va ortiqchasini olib tashlayman.\n\n"
+            "<i>Masalan:</i>\n"
+            "<code>Fargʻona markazida 2 xonali kvartira ijaraga, 5/9, taʼmirli, "
+            "2500000 soʻm. Tel: +998901234567</code>\n\n"
+            "Rasm(lar)ni izoh (matn) bilan birga ham yuborishingiz mumkin."
         ),
         "ru": (
-            "🏠 Разместим объект. Выберите тип сделки —\n"
-            "<i>или опишите объект одним сообщением, например:</i>\n"
-            "<code>2к маргилан 450000 продажа хозяин +998901234567</code>"
+            "🏠 <b>Размещение объекта.</b>\n"
+            "Пришлите объявление <b>одним сообщением</b> — своё или готовое от партнёра. "
+            "Я сам разберу данные, оформлю в стиле агентства и уберу лишнее.\n\n"
+            "<i>Например:</i>\n"
+            "<code>2-комн. квартира в центре Ферганы, аренда, 5/9, с ремонтом, "
+            "2 500 000 сум. Тел: +998901234567</code>\n\n"
+            "Можно прислать фото с текстом в подписи."
         ),
         "en": (
-            "🏠 Let’s post your property. Choose the deal type —\n"
-            "<i>or describe it in a single message, e.g.:</i>\n"
-            "<code>2r margilan 450000 sale owner +998901234567</code>"
+            "🏠 <b>Post a listing.</b>\n"
+            "Send the ad in <b>one message</b> — yours or a ready one from a colleague. "
+            "I’ll extract the data, format it in the agency style and trim the excess.\n\n"
+            "<i>Example:</i>\n"
+            "<code>2-room apartment in central Fergana, rent, 5/9, renovated, "
+            "2,500,000 UZS. Tel: +998901234567</code>\n\n"
+            "You may also send photo(s) with the text in the caption."
         ),
+    },
+    "owner_send_text": {
+        "uz": "Iltimos, eʼlon <b>matnini</b> xabar bilan yuboring — men uni ajrataman.",
+        "ru": "Пришлите <b>текст</b> объявления сообщением — я его разберу.",
+        "en": "Please send the ad <b>text</b> as a message — I’ll parse it.",
+    },
+    "owner_need_deal": {
+        "uz": "Bitim turini aniqlashtiring:",
+        "ru": "Уточните тип сделки:",
+        "en": "Please specify the deal type:",
+    },
+    "owner_need_price": {
+        "uz": "Narxni topa olmadim. Narxni raqam bilan kiriting (masalan, 2500000):",
+        "ru": "Не нашёл цену. Укажите цену числом (например, 2500000):",
+        "en": "Couldn’t find the price. Enter it as a number (e.g. 2500000):",
     },
     "owner_deal_rent": {"uz": "🔑 Ijaraga", "ru": "🔑 Аренда", "en": "🔑 Rent out"},
     "owner_deal_sale": {"uz": "🏷 Sotuv", "ru": "🏷 Продажа", "en": "🏷 Sale"},
