@@ -1,9 +1,10 @@
 """Хендлеры собственника: размещение объекта одним сообщением (осн. путь).
 
-Логика: пользователь присылает объявление целиком (своё или готовое от
-партнёра) — ИИ разбирает поля и оформляет описание в стиле агентства.
-Вручную бот спрашивает ТОЛЬКО то, что не удалось распознать и что критично
-для публикации: тип сделки, цену, телефон. Затем фото и подтверждение.
+Пользователь присылает объявление целиком — текст + фото/видео (часто
+альбомом). Бот забирает ВСЕ медиа (фото и видео) из присланного, разбирает
+поля ИИ-сервисом и оформляет описание. Вручную дозапрашивает только то, что
+не распознал и что критично: тип сделки, цену, район/массив (из списка),
+телефон. Адрес-ориентир («за рестораном», «рядом с домом») сохраняется как есть.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,16 +39,22 @@ logger = logging.getLogger(__name__)
 router = Router(name="owner")
 P = owner_kb.PREFIX
 
-# Сериализация записи фото в FSM (фото альбома приходят конкурентно).
-_photo_lock = asyncio.Lock()
+# Сериализация записи медиа в FSM (альбом приходит конкурентными апдейтами).
+_media_lock = asyncio.Lock()
 
-# Поля, которые переносим из разбора объявления в состояние
+# Поля из разбора объявления, переносимые в состояние
 _LISTING_FIELDS = ("deal_type", "property_kind", "rooms", "district", "address",
                    "area", "floor", "floors", "description")
 
+# Состояния, в которых по-прежнему принимаем медиа (фото/видео) из объявления/альбома
+_MEDIA_STATES = (
+    OwnerForm.raw, OwnerForm.deal_type, OwnerForm.price,
+    OwnerForm.district, OwnerForm.phone, OwnerForm.photos, OwnerForm.confirm,
+)
+
 
 # ---------------------------------------------------------------------------
-# Вход: просим прислать объявление одним сообщением
+# Вход
 # ---------------------------------------------------------------------------
 async def begin_property_form(message: Message, state: FSMContext, lang: str) -> None:
     await state.clear()
@@ -71,34 +78,52 @@ async def cmd_add(message: Message, state: FSMContext, session: AsyncSession, la
 
 
 # ---------------------------------------------------------------------------
-# Разбор объявления (текст или фото с подписью)
+# Приём медиа (фото/видео) на любом шаге размещения — включая альбом с текстом
+# ---------------------------------------------------------------------------
+@router.message(StateFilter(*_MEDIA_STATES), F.photo | F.video)
+async def collect_media(message: Message, state: FSMContext, lang: str) -> None:
+    async with _media_lock:
+        data = await state.get_data()
+        photos: list[str] = list(data.get("photos", []))
+        if message.photo:
+            photos.append(message.photo[-1].file_id)
+        update = {"photos": photos}
+        if message.video:
+            update["video"] = message.video.file_id
+        mg = message.media_group_id
+        first_in_group = not mg or data.get("_mg") != mg
+        update["_mg"] = mg
+        await state.update_data(**update)
+
+    current = await state.get_state()
+    caption = (message.caption or "").strip()
+
+    if current == OwnerForm.raw.state:
+        if caption and not data.get("_parsed"):
+            await state.update_data(_parsed=True)
+            await _handle_listing(message, state, lang, caption)
+        elif not caption and first_in_group and not data.get("_parsed") and not data.get("_asked_text"):
+            await state.update_data(_asked_text=True)
+            await message.answer(i18n.t("owner_send_text", lang))
+    elif current == OwnerForm.photos.state and first_in_group:
+        await message.answer(
+            i18n.t("media_accepted", lang, n=len(photos)),
+            reply_markup=owner_kb.photos_done_kb(lang),
+        )
+    # В остальных состояниях медиа тихо копится (стрелки альбома после разбора).
+
+
+# ---------------------------------------------------------------------------
+# Разбор объявления (текст)
 # ---------------------------------------------------------------------------
 @router.message(OwnerForm.raw, F.text)
 async def listing_text(message: Message, state: FSMContext, lang: str) -> None:
+    await state.update_data(_parsed=True)
     await _handle_listing(message, state, lang, message.text)
-
-
-@router.message(OwnerForm.raw, F.photo)
-async def listing_photo(message: Message, state: FSMContext, lang: str) -> None:
-    async with _photo_lock:
-        data = await state.get_data()
-        photos: list[str] = data.get("photos", [])
-        photos.append(message.photo[-1].file_id)
-        await state.update_data(photos=photos)
-    caption = (message.caption or "").strip()
-    if caption:
-        await _handle_listing(message, state, lang, caption)
-    else:
-        # Фото без подписи: ждём текст объявления (просим один раз).
-        data = await state.get_data()
-        if not data.get("_asked_text"):
-            await state.update_data(_asked_text=True)
-            await message.answer(i18n.t("owner_send_text", lang))
 
 
 async def _handle_listing(message: Message, state: FSMContext, lang: str, text: str) -> None:
     parsed = await get_ai_service().parse_listing(text)
-    # комнаты есть, а вид не распознан → по умолчанию квартира
     if parsed.get("rooms") and not parsed.get("property_kind"):
         parsed["property_kind"] = "apartment"
 
@@ -107,14 +132,16 @@ async def _handle_listing(message: Message, state: FSMContext, lang: str, text: 
         update["price"] = parsed["price"]
     if parsed.get("phone"):
         update["owner_phone"] = parsed["phone"]
-    await state.update_data(**update)
+    # Слияние под тем же локом, что и добавление медиа, — не теряем стрелки альбома.
+    async with _media_lock:
+        await state.update_data(**update)
 
     await message.answer(i18n.t("owner_quick_ok", lang))
     await _route_missing(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
-# Дозапрос только недостающего критичного: сделка → цена → телефон → фото
+# Дозапрос недостающего: сделка → цена → район/массив → телефон → медиа
 # ---------------------------------------------------------------------------
 async def _route_missing(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
@@ -123,16 +150,20 @@ async def _route_missing(message: Message, state: FSMContext, lang: str) -> None
         await message.answer(i18n.t("owner_need_deal", lang), reply_markup=owner_kb.deal_type_kb(lang))
         return
     if not data.get("property_kind"):
-        await state.update_data(property_kind="apartment")  # тип по умолчанию, не спрашиваем
+        await state.update_data(property_kind="apartment")  # тип по умолчанию
     if data.get("price") is None:
         await state.set_state(OwnerForm.price)
         await message.answer(i18n.t("owner_need_price", lang))
+        return
+    if not data.get("district"):
+        await state.set_state(OwnerForm.district)
+        await message.answer(i18n.t("owner_ask_massif", lang), reply_markup=owner_kb.district_kb(lang))
         return
     if not data.get("owner_phone"):
         await state.set_state(OwnerForm.phone)
         await message.answer(i18n.t("owner_ask_phone", lang))
         return
-    await _ask_photos(message, state, lang)
+    await _ask_media(message, state, lang)
 
 
 @router.callback_query(OwnerForm.deal_type, F.data.startswith(f"{P}:deal:"))
@@ -153,6 +184,32 @@ async def price_txt(message: Message, state: FSMContext, lang: str) -> None:
     await _route_missing(message, state, lang)
 
 
+# --- Район/массив ---
+@router.callback_query(OwnerForm.district, F.data.startswith(f"{P}:mass:"))
+async def massif_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
+    code = callback.data.split(":")[2]
+    if code == "other":
+        await callback.message.answer(i18n.t("owner_massif_type", lang))
+        await callback.answer()
+        return  # остаёмся в district, ждём текст
+    if code != "skip":
+        massif = owner_kb.get_massif(code)
+        if massif:
+            await state.update_data(district=massif)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    # skip → district остаётся пустым (адрес-ориентир всё равно сохранён)
+    if code == "skip":
+        await state.update_data(district=None)
+    await _route_missing(callback.message, state, lang)
+    await callback.answer()
+
+
+@router.message(OwnerForm.district, F.text)
+async def massif_txt(message: Message, state: FSMContext, lang: str) -> None:
+    await state.update_data(district=message.text.strip()[:128])
+    await _route_missing(message, state, lang)
+
+
 @router.message(OwnerForm.phone, F.text)
 async def phone_txt(message: Message, state: FSMContext, lang: str) -> None:
     if not is_valid_phone(message.text):
@@ -163,44 +220,15 @@ async def phone_txt(message: Message, state: FSMContext, lang: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Фото → видео (опционально) → подтверждение
+# Медиа-шаг (можно доложить фото/видео) → подтверждение
 # ---------------------------------------------------------------------------
-async def _ask_photos(message: Message, state: FSMContext, lang: str) -> None:
+async def _ask_media(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(OwnerForm.photos)
-    await message.answer(i18n.t("ask_photos", lang), reply_markup=owner_kb.photos_done_kb(lang))
-
-
-@router.message(OwnerForm.photos, F.photo)
-async def collect_photo(message: Message, state: FSMContext, lang: str) -> None:
-    async with _photo_lock:
-        data = await state.get_data()
-        photos: list[str] = data.get("photos", [])
-        photos.append(message.photo[-1].file_id)
-        notify = not message.media_group_id or data.get("_mg") != message.media_group_id
-        await state.update_data(photos=photos, _mg=message.media_group_id)
-    if notify:
-        await message.answer(
-            i18n.t("photo_accepted", lang, n=len(photos)),
-            reply_markup=owner_kb.photos_done_kb(lang),
-        )
+    await message.answer(i18n.t("ask_media", lang), reply_markup=owner_kb.photos_done_kb(lang))
 
 
 @router.callback_query(OwnerForm.photos, F.data == f"{P}:pdone")
-async def photos_done(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    await state.set_state(OwnerForm.video)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(i18n.t("ask_video", lang), reply_markup=owner_kb.video_skip_kb(lang))
-    await callback.answer()
-
-
-@router.message(OwnerForm.video, F.video)
-async def collect_video(message: Message, state: FSMContext, lang: str) -> None:
-    await state.update_data(video=message.video.file_id)
-    await _show_confirm(message, state, lang)
-
-
-@router.callback_query(OwnerForm.video, F.data == f"{P}:novideo")
-async def skip_video(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
+async def media_done(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     await callback.message.edit_reply_markup(reply_markup=None)
     await _show_confirm(callback.message, state, lang)
     await callback.answer()
@@ -265,7 +293,6 @@ async def _save_property(
 ) -> None:
     data = await state.get_data()
 
-    # Описание: причёсанное ИИ из объявления; иначе — офлайн-фолбэк.
     description = data.get("description") or await get_ai_service().generate_short_description(data)
 
     photos = data.get("photos", [])

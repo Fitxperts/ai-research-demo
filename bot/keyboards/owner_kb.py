@@ -15,6 +15,40 @@ RENOVATION = {
     "designer": "reno_designer",
 }
 
+# Районы/массивы Ферганы для выбора (адрес-ориентир сохраняется отдельно)
+FERGANA_MASSIVES = [
+    "ЭкоСити Аэропорт",
+    "Миндонобод",
+    "Киргули",
+    "Фрунзе",
+    "Ахунбабаев",
+    "Калининский",
+    "Текстиль",
+    "Военный городок",
+    "Маталка",
+]
+
+
+def district_kb(lang: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i in range(0, len(FERGANA_MASSIVES), 2):
+        rows.append([
+            InlineKeyboardButton(text=name, callback_data=f"{PREFIX}:mass:{idx}")
+            for idx, name in enumerate(FERGANA_MASSIVES[i : i + 2], start=i)
+        ])
+    rows.append([
+        InlineKeyboardButton(text=i18n.btn("massif_other", lang), callback_data=f"{PREFIX}:mass:other"),
+        InlineKeyboardButton(text=i18n.btn("massif_skip", lang), callback_data=f"{PREFIX}:mass:skip"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_massif(idx: str) -> str | None:
+    if not idx.isdigit():
+        return None
+    i = int(idx)
+    return FERGANA_MASSIVES[i] if 0 <= i < len(FERGANA_MASSIVES) else None
+
 
 def deal_type_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(

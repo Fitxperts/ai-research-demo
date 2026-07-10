@@ -153,7 +153,10 @@ class AIService:
         lines.append(tags)
         lines.append("")
 
-        address = escape_md(d.get("address") or "—")
+        # Манзил: массив/район + ориентир (что прислали). Прочерк — только если
+        # вообще ничего нет.
+        loc_parts = [p for p in (d.get("district"), d.get("address")) if p]
+        address = escape_md(", ".join(loc_parts) or "—")
         lines.append(f"{em('📍', 'pin')} *Манзил:* {address}\\.")
         lines.append("")
 
@@ -239,7 +242,10 @@ class AIService:
             "недвижимости извлеки данные в JSON со строго такими полями:\n"
             "deal_type (rent — аренда/ижара, sale — продажа/сотув),\n"
             "property_kind (apartment, house, land, commercial),\n"
-            "rooms (целое), district (район/массив, строка), address (строка),\n"
+            "rooms (целое), district (район/массив, строка),\n"
+            "address — адрес или ОРИЕНТИР как в тексте ('за рестораном X', "
+            "'рядом с домом/ЖК Y', название дома/компании). НЕ отбрасывай "
+            "неформальные адреса и НЕ выдумывай — бери как написано,\n"
             "area (число, м²), floor (этаж, целое), floors (этажность, целое),\n"
             "price (число без пробелов и валюты), phone (строка),\n"
             "description — короткое аккуратное описание объекта в едином деловом "
