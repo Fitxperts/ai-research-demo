@@ -200,6 +200,26 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "✍️ Напишите ваш вопрос или опишите ошибку — сообщение уйдёт администратору. Отмена: /cancel",
         "en": "✍️ Write your question or describe the bug — it will be sent to the administrator. Cancel: /cancel",
     },
+    "lead_intro": {
+        "uz": "👋 Siz kanaldagi obyektga qiziqdingiz:",
+        "ru": "👋 Вы заинтересовались объектом из канала:",
+        "en": "👋 You’re interested in this listing from the channel:",
+    },
+    "lead_ask_phone": {
+        "uz": "📞 Raqamingizni qoldiring — rieltor tez orada qoʻngʻiroq qiladi (yoki tugma bilan yuboring):",
+        "ru": "📞 Оставьте номер — риелтор скоро перезвонит (или отправьте кнопкой):",
+        "en": "📞 Leave your number — an agent will call you back (or use the button):",
+    },
+    "lead_thanks": {
+        "uz": "✅ Rahmat! Arizangiz qabul qilindi, rieltor tez orada bogʻlanadi.",
+        "ru": "✅ Спасибо! Заявка принята, риелтор скоро свяжется с вами.",
+        "en": "✅ Thank you! Your request is received, an agent will contact you soon.",
+    },
+    "lead_not_found": {
+        "uz": "Bu obyekt allaqachon mavjud emas. /start — boshqa variantlar.",
+        "ru": "Этого объекта уже нет в наличии. /start — другие варианты.",
+        "en": "This listing is no longer available. /start — other options.",
+    },
     "support_sent": {
         "uz": "✅ Xabaringiz yuborildi. Tez orada javob beramiz.",
         "ru": "✅ Ваше сообщение отправлено. Мы скоро ответим.",

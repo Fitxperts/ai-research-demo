@@ -40,17 +40,23 @@ class FakeBot:
     def __init__(self) -> None:
         self.calls: list = []
         self.messages: list = []
+        self.markups: list = []
         self._id = 100
 
-    async def send_message(self, chat, text, parse_mode=None):
+    async def me(self):
+        return _Me("test_bot")
+
+    async def send_message(self, chat, text, parse_mode=None, reply_markup=None):
         self.calls.append(("message", chat, len(text)))
         self.messages.append((chat, text))
+        self.markups.append(reply_markup)
         self._id += 1
         return _Msg(self._id)
 
-    async def send_photo(self, chat, photo, caption=None, parse_mode=None):
+    async def send_photo(self, chat, photo, caption=None, parse_mode=None, reply_markup=None):
         self.calls.append(("photo", chat, caption is not None))
         self.messages.append((chat, caption))
+        self.markups.append(reply_markup)
         self._id += 1
         return _Msg(self._id)
 
@@ -72,3 +78,8 @@ class FakeBot:
 class _Msg:
     def __init__(self, mid: int) -> None:
         self.message_id = mid
+
+
+class _Me:
+    def __init__(self, username: str) -> None:
+        self.username = username

@@ -9,7 +9,7 @@ import logging
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
-from aiogram.types import InputMediaPhoto
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
@@ -46,6 +46,21 @@ def _prop_to_dict(prop: Property) -> dict:
 CAPTION_LIMIT = 1024  # лимит подписи к фото в Telegram
 MAX_ALBUM = 10        # лимит фото в одной медиагруппе
 
+# Подпись кнопки-заявки под постом (канал узбекоязычный + дубль на русском)
+LEAD_BUTTON_TEXT = "✍️ Ariza qoldirish · Оставить заявку"
+
+
+async def _lead_kb(bot: Bot, property_id: str) -> InlineKeyboardMarkup | None:
+    """Инлайн-кнопка «Оставить заявку» → deep-link в бота с id объекта."""
+    try:
+        username = (await bot.me()).username
+    except Exception:  # noqa: BLE001 - на всякий случай, без кнопки пост всё равно уйдёт
+        return None
+    if not username:
+        return None
+    url = f"https://t.me/{username}?start=lead_{property_id}"
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=LEAD_BUTTON_TEXT, url=url)]])
+
 
 def _caption_post(photos: list[str], text: str) -> bool:
     """Публикуется ли объект как фото-с-подписью (иначе — отдельным текстом)."""
@@ -74,28 +89,34 @@ async def _send_album(bot: Bot, channel_id: str, photos: list[str], caption: str
     return first_id
 
 
-async def _send_post(bot: Bot, channel_id: str, text: str, photos: list[str]) -> int:
+async def _send_post(
+    bot: Bot, channel_id: str, text: str, photos: list[str], reply_markup=None
+) -> int:
     """Отправить пост и вернуть id сообщения, несущего описание (для будущих правок).
 
-    - фото + короткий текст → подпись к фото/альбому (id = первое фото);
-    - фото + длинный текст (>1024) → альбом(ы) без подписи + отдельное текстовое
-      сообщение (id = текстовое сообщение);
-    - без фото → текстовое сообщение.
+    Инлайн-кнопки (заявка) нельзя прикрепить к медиагруппе, поэтому:
+    - одно фото + короткий текст → фото с подписью и кнопкой (id = фото);
+    - несколько фото / длинный текст → медиа без подписи + отдельное текстовое
+      сообщение с описанием и кнопкой (id = текстовое сообщение);
+    - без фото → текстовое сообщение с кнопкой.
     Альбомы бьются на пачки по 10 фото.
     """
-    if photos and len(text) <= CAPTION_LIMIT:
-        if len(photos) > 1:
-            first_id = await _send_album(bot, channel_id, photos, caption=text)
-            if first_id is not None:
-                return first_id
+    if len(photos) == 1 and len(text) <= CAPTION_LIMIT:
+        message = await bot.send_photo(
+            channel_id, photos[0], caption=text,
+            parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup,
+        )
+        return message.message_id
+
+    if photos:  # альбом ИЛИ длинный текст → медиа без подписи + текст с кнопкой
+        if len(photos) == 1:
+            await bot.send_photo(channel_id, photos[0])
         else:
-            message = await bot.send_photo(channel_id, photos[0], caption=text, parse_mode=ParseMode.MARKDOWN_V2)
-            return message.message_id
+            await _send_album(bot, channel_id, photos, caption=None)
 
-    if photos:  # длинный текст — альбом(ы) без подписи + отдельное текстовое сообщение
-        await _send_album(bot, channel_id, photos, caption=None)
-
-    message = await bot.send_message(channel_id, text, parse_mode=ParseMode.MARKDOWN_V2)
+    message = await bot.send_message(
+        channel_id, text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup
+    )
     return message.message_id
 
 
@@ -127,7 +148,8 @@ async def publish_property(bot: Bot, session: AsyncSession, property_id: str) ->
         return None
 
     text = get_ai_service().generate_description(_prop_to_dict(prop))
-    post_id = await _send_post(bot, get_settings().channel_id, text, prop.photo_list)
+    kb = await _lead_kb(bot, prop.id)
+    post_id = await _send_post(bot, get_settings().channel_id, text, prop.photo_list, reply_markup=kb)
 
     prop.channel_post_id = post_id
     prop.status = PropertyStatus.active
@@ -202,7 +224,8 @@ async def bump_property(bot: Bot, session: AsyncSession, property_id: str) -> Pr
         )
 
     # Публикуем свежий пост
-    post_id = await _send_post(bot, channel_id, text, prop.photo_list)
+    kb = await _lead_kb(bot, prop.id)
+    post_id = await _send_post(bot, channel_id, text, prop.photo_list, reply_markup=kb)
     prop.channel_post_id = post_id
     prop.last_bump = timeutils.now()
     await session.commit()

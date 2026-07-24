@@ -12,7 +12,7 @@ import logging
 from html import escape
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command, CommandStart, StateFilter
+from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -53,9 +53,20 @@ _LANG_PROMPT = "🌐 Tilni tanlang / Выберите язык / Choose your lan
 # /start
 # ---------------------------------------------------------------------------
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, lang: str) -> None:
+async def cmd_start(
+    message: Message, state: FSMContext, session: AsyncSession, lang: str, command: CommandObject
+) -> None:
     await state.clear()
     user = await _ensure_user(message, session)
+
+    # Deep-link «оставить заявку» из-под поста в канале: start=lead_<property_id>
+    args = command.args or ""
+    if args.startswith("lead_"):
+        from bot.handlers.lead import begin_lead
+
+        await begin_lead(message, state, session, lang, args[5:], message.bot)
+        return
+
     if not user.language:
         await message.answer(_LANG_PROMPT, reply_markup=common_kb.language_kb())
         return

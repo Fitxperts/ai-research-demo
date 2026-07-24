@@ -43,6 +43,55 @@ async def test_album_over_ten_photos_chunked(session):
     assert album_sizes == [10, 10, 3]
 
 
+async def test_publish_attaches_lead_button(session):
+    bot = FakeBot()
+    p = await crud.create_property(session, property_kind=PropertyKind.apartment, type=PropertyType.rent,
+                                   status=PropertyStatus.pending, district="Центр", price=1, currency="сум",
+                                   photos="f1,f2,f3")
+    prop = await publisher.publish_property(bot, session, p.id)
+    # среди отправленных сообщений есть кнопка-заявка с deep-link на объект
+    urls = [
+        btn.url
+        for kb in bot.markups if kb is not None
+        for row in kb.inline_keyboard for btn in row if btn.url
+    ]
+    assert any(f"start=lead_{prop.id}" in u for u in urls), urls
+
+
+async def test_lead_creates_client(session):
+    from types import SimpleNamespace
+
+    from bot.database.models import ClientDealType
+    from bot.handlers import lead
+
+    bot = FakeBot()
+    p = await crud.create_property(session, property_kind=PropertyKind.apartment, type=PropertyType.sale,
+                                   status=PropertyStatus.active, district="Киргули", price=500, currency="сум")
+
+    class FakeState:
+        def __init__(self, data):
+            self._d = dict(data)
+        async def get_data(self):
+            return self._d
+        async def clear(self):
+            self._d = {}
+
+    msg = SimpleNamespace(
+        from_user=SimpleNamespace(id=777, full_name="Али", username="ali"),
+        answer=_noop_answer,
+    )
+    await lead._finish_lead(msg, FakeState({"lead_property_id": p.id}), session, bot, "ru", "+998901112233")
+
+    clients = await crud.all_clients(session)
+    assert len(clients) == 1
+    assert clients[0].deal_type == ClientDealType.buy   # sale → buy
+    assert clients[0].district == "Киргули" and clients[0].phone == "+998901112233"
+
+
+async def _noop_answer(*a, **k):
+    return None
+
+
 async def test_mark_as_rented(session):
     bot = FakeBot()
     p = await crud.create_property(session, property_kind=PropertyKind.apartment, type=PropertyType.sale,
