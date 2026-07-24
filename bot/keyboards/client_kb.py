@@ -61,19 +61,6 @@ def districts_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def rooms_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="1", callback_data=f"{PREFIX}:rooms:1"),
-                InlineKeyboardButton(text="2", callback_data=f"{PREFIX}:rooms:2"),
-                InlineKeyboardButton(text="3", callback_data=f"{PREFIX}:rooms:3"),
-                InlineKeyboardButton(text="4+", callback_data=f"{PREFIX}:rooms:4"),
-            ]
-        ]
-    )
-
-
 def residents_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

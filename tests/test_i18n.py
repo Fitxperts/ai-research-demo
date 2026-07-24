@@ -20,7 +20,7 @@ def test_t_fallback_and_format():
     # неизвестный язык -> русский по умолчанию
     assert i18n.t("cancel_none", "xx") == i18n.MESSAGES["cancel_none"]["ru"]
     # подстановка параметров
-    assert "7" in i18n.t("photo_accepted", "uz", n=7)
+    assert "7" in i18n.t("media_accepted", "uz", n=7)
 
 
 def test_menu_texts_are_unique_per_language():

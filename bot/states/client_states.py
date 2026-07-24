@@ -6,7 +6,6 @@ class ClientForm(StatesGroup):
     deal_type = State()   # аренда или покупка
     district = State()    # район
     budget = State()      # бюджет
-    rooms = State()       # количество комнат
     residents = State()   # кто будет жить
     move_date = State()   # дата заселения
     phone = State()       # телефон

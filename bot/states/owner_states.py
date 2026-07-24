@@ -1,29 +1,12 @@
-"""FSM-состояния сценария собственника (размещение объекта)."""
+"""FSM-состояния сценария собственника (размещение объекта одним сообщением)."""
 from aiogram.fsm.state import State, StatesGroup
 
 
 class OwnerForm(StatesGroup):
-    raw = State()            # объявление одним сообщением (осн. путь)
-    deal_type = State()      # аренда или продажа
-    property_kind = State()  # квартира/дом/участок/коммерция
-    address = State()        # адрес
-    district = State()       # район
-    rooms = State()          # комнаты
-    area = State()           # площадь
-    floor = State()          # этаж
-    floors = State()         # этажность
-    renovation = State()     # ремонт
-    furniture = State()      # мебель
-    appliances = State()     # техника
-    gas = State()            # газ
-    water = State()          # вода
-    electricity = State()    # электричество
-    internet = State()       # интернет
-    docs = State()           # документы
-    mortgage = State()       # ипотека/кредит
-    price = State()          # цена
-    negotiable = State()     # торг
-    phone = State()          # телефон
-    photos = State()         # фото (несколько)
-    video = State()          # видео (опционально)
-    confirm = State()        # подтверждение
+    raw = State()        # объявление одним сообщением (осн. путь)
+    deal_type = State()  # тип сделки (дозапрос, если не распознан)
+    price = State()      # цена (дозапрос)
+    district = State()   # район/массив (дозапрос: выбор из списка или свой)
+    phone = State()      # телефон (дозапрос)
+    photos = State()     # медиа-шаг (фото/видео) + «Готово»
+    confirm = State()    # подтверждение
