@@ -123,6 +123,8 @@ async def listing_text(message: Message, state: FSMContext, lang: str) -> None:
 
 
 async def _handle_listing(message: Message, state: FSMContext, lang: str, text: str) -> None:
+    # Мгновенная реакция: разбор через ИИ может занять пару секунд — бот не молчит.
+    await message.answer(i18n.t("owner_parsing", lang))
     parsed = await get_ai_service().parse_listing(text)
     if parsed.get("rooms") and not parsed.get("property_kind"):
         parsed["property_kind"] = "apartment"

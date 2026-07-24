@@ -360,6 +360,11 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "Пришлите <b>текст</b> объявления сообщением — я его разберу.",
         "en": "Please send the ad <b>text</b> as a message — I’ll parse it.",
     },
+    "owner_parsing": {
+        "uz": "🔎 Eʼlonni tahlil qilyapman…",
+        "ru": "🔎 Разбираю объявление…",
+        "en": "🔎 Parsing the listing…",
+    },
     "owner_need_deal": {
         "uz": "Bitim turini aniqlashtiring:",
         "ru": "Уточните тип сделки:",
