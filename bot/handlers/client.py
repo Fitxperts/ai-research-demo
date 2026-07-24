@@ -23,7 +23,7 @@ from bot.keyboards import client_kb
 from bot.services import matcher
 from bot.states.client_states import ClientForm
 from bot.utils.formatters import format_client_card, format_property_card
-from bot.utils.validators import is_valid_phone, parse_date, parse_price
+from bot.utils.validators import is_valid_phone, parse_price
 
 logger = logging.getLogger(__name__)
 router = Router(name="client")
@@ -106,62 +106,12 @@ async def budget_txt(message: Message, state: FSMContext, lang: str) -> None:
         await message.answer(i18n.t("budget_bad", lang))
         return
     await state.update_data(budget=budget)
-    await _ask_residents(message, state, lang)
-
-
-# ---------------------------------------------------------------------------
-# Шаг 4. Состав проживающих (вопрос про комнаты убран — в группе объекты
-# одного типажа, лишний вопрос ни к чему)
-# ---------------------------------------------------------------------------
-async def _ask_residents(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(ClientForm.residents)
-    await message.answer(i18n.t("ask_residents", lang), reply_markup=client_kb.residents_kb(lang))
-
-
-@router.callback_query(ClientForm.residents, F.data.startswith(f"{client_kb.PREFIX}:res:"))
-async def residents_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    key = callback.data.split(":")[2]
-    msg_key = client_kb.RESIDENTS.get(key)
-    await state.update_data(residents=i18n.t(msg_key, lang) if msg_key else key)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_move_date(callback.message, state, lang)
-    await callback.answer()
-
-
-@router.message(ClientForm.residents, F.text)
-async def residents_txt(message: Message, state: FSMContext, lang: str) -> None:
-    await state.update_data(residents=message.text.strip()[:128])
-    await _ask_move_date(message, state, lang)
-
-
-# ---------------------------------------------------------------------------
-# Шаг 6. Дата заселения
-# ---------------------------------------------------------------------------
-async def _ask_move_date(message: Message, state: FSMContext, lang: str) -> None:
-    await state.set_state(ClientForm.move_date)
-    await message.answer(i18n.t("ask_move_date", lang), reply_markup=client_kb.skip_date_kb(lang))
-
-
-@router.callback_query(ClientForm.move_date, F.data == f"{client_kb.PREFIX}:skipdate")
-async def skip_date_cb(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
-    await state.update_data(move_date=None)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_phone(callback.message, state, lang)
-    await callback.answer()
-
-
-@router.message(ClientForm.move_date, F.text)
-async def move_date_txt(message: Message, state: FSMContext, lang: str) -> None:
-    parsed = parse_date(message.text)
-    if parsed is None:
-        await message.answer(i18n.t("date_bad", lang), reply_markup=client_kb.skip_date_kb(lang))
-        return
-    await state.update_data(move_date=parsed.isoformat())
     await _ask_phone(message, state, lang)
 
 
 # ---------------------------------------------------------------------------
-# Шаг 7. Телефон
+# Шаг 4. Телефон (шаги «кто будет жить» и «дата заселения» убраны — короче
+# анкета = больше клиентов доходят до заявки)
 # ---------------------------------------------------------------------------
 async def _ask_phone(message: Message, state: FSMContext, lang: str) -> None:
     await state.set_state(ClientForm.phone)
@@ -212,7 +162,6 @@ async def confirm_save(
     callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot, lang: str
 ) -> None:
     data = await state.get_data()
-    move_date = data.get("move_date")
 
     client = await crud.create_client(
         session,
@@ -223,8 +172,6 @@ async def confirm_save(
         district=data.get("district"),
         budget=data.get("budget"),
         currency="сум",
-        residents=data.get("residents"),
-        move_date=parse_date_iso(move_date),
     )
     await state.clear()
 
@@ -289,22 +236,9 @@ def _preview_card(data: dict, lang: str) -> str:
         f"{i18n.t('preview_deal', lang)}: {deal}",
         f"{i18n.t('preview_district', lang)}: {esc(data.get('district'))}",
         f"{i18n.t('preview_budget', lang)}: {budget_str}",
-        f"{i18n.t('preview_residents', lang)}: {esc(data.get('residents'))}",
-        f"{i18n.t('preview_move_in', lang)}: {esc(data.get('move_date'))}",
         f"{i18n.t('preview_phone', lang)}: {esc(data.get('phone'))}",
     ]
     return "\n".join(lines)
-
-
-def parse_date_iso(value: str | None):
-    if not value:
-        return None
-    import datetime as dt
-
-    try:
-        return dt.date.fromisoformat(value)
-    except (ValueError, TypeError):
-        return None
 
 
 async def _notify_admins(bot: Bot, text: str) -> None:

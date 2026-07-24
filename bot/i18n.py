@@ -261,21 +261,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "Не понял сумму. Введите число, например 3000000.",
         "en": "Couldn’t read the amount. Enter a number, e.g. 3000000.",
     },
-    "ask_residents": {
-        "uz": "👨‍👩‍👧 Kim yashaydi?",
-        "ru": "👨‍👩‍👧 Кто будет жить?",
-        "en": "👨‍👩‍👧 Who will live there?",
-    },
-    "ask_move_date": {
-        "uz": "📅 Koʻchib oʻtishni qachon rejalashtiryapsiz? (KK.OO.YYYY)",
-        "ru": "📅 Когда планируете заселение? (ДД.ММ.ГГГГ)",
-        "en": "📅 When do you plan to move in? (DD.MM.YYYY)",
-    },
-    "date_bad": {
-        "uz": "Sana tushunarsiz. KK.OO.YYYY formati yoki «Oʻtkazib yuborish».",
-        "ru": "Не понял дату. Формат ДД.ММ.ГГГГ или нажмите «Пропустить».",
-        "en": "Couldn’t read the date. Use DD.MM.YYYY or tap “Skip”.",
-    },
     "ask_phone": {
         "uz": "📞 Bogʻlanish uchun telefon qoldiring (yoki tugma bilan yuboring):",
         "ru": "📞 Оставьте телефон для связи (или отправьте номер кнопкой):",
@@ -331,16 +316,10 @@ MESSAGES: dict[str, dict[str, str]] = {
     "preview_deal": {"uz": "Bitim", "ru": "Сделка", "en": "Deal"},
     "preview_district": {"uz": "Tuman", "ru": "Район", "en": "District"},
     "preview_budget": {"uz": "Byudjet", "ru": "Бюджет", "en": "Budget"},
-    "preview_residents": {"uz": "Kim yashaydi", "ru": "Кто будет жить", "en": "Residents"},
-    "preview_move_in": {"uz": "Koʻchib oʻtish", "ru": "Заселение", "en": "Move-in"},
     "preview_phone": {"uz": "Telefon", "ru": "Телефон", "en": "Phone"},
     "deal_rent_word": {"uz": "Ijara", "ru": "Аренда", "en": "Rent"},
     "deal_buy_word": {"uz": "Sotib olish", "ru": "Покупка", "en": "Buy"},
     # Состав проживающих (значения)
-    "res_one": {"uz": "Bir kishi", "ru": "Один", "en": "One person"},
-    "res_couple": {"uz": "Er-xotin", "ru": "Пара", "en": "Couple"},
-    "res_family": {"uz": "Bolali oila", "ru": "Семья с детьми", "en": "Family with kids"},
-    "res_students": {"uz": "Talabalar", "ru": "Студенты", "en": "Students"},
     # Периоды звонка
     "period_morning": {"uz": "Ertalab", "ru": "Утро", "en": "Morning"},
     "period_day": {"uz": "Kunduzi", "ru": "День", "en": "Day"},

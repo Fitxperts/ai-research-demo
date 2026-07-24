@@ -19,14 +19,6 @@ FERGANA_DISTRICTS = [
     "Ташлак",
 ]
 
-# Состав проживающих: ключ -> i18n-ключ подписи
-RESIDENTS = {
-    "one": "res_one",
-    "couple": "res_couple",
-    "family": "res_family",
-    "students": "res_students",
-}
-
 # Слоты по времени суток
 TIME_SLOTS = {
     "morning": ["09:00", "10:00", "11:00"],
@@ -59,23 +51,6 @@ def districts_kb(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=i18n.btn("district_other", lang), callback_data=f"{PREFIX}:dist:other")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def residents_kb(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=i18n.t(msg_key, lang), callback_data=f"{PREFIX}:res:{key}")]
-            for key, msg_key in RESIDENTS.items()
-        ]
-    )
-
-
-def skip_date_kb(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=i18n.btn("skip", lang), callback_data=f"{PREFIX}:skipdate")]
-        ]
-    )
 
 
 def confirm_kb(lang: str) -> InlineKeyboardMarkup:
