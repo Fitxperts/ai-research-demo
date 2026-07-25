@@ -17,6 +17,7 @@ from bot.database import crud
 from bot.database.models import Property, PropertyStatus, PropertyType
 from bot.services import matcher
 from bot.services.ai_service import get_ai_service
+from bot.services.watermark import watermark_photos
 from bot.utils import timeutils
 from bot.utils.formatters import format_property_card
 
@@ -67,7 +68,7 @@ def _caption_post(photos: list[str], text: str) -> bool:
     return bool(photos) and len(text) <= CAPTION_LIMIT
 
 
-async def _send_album(bot: Bot, channel_id: str, photos: list[str], caption: str | None) -> int | None:
+async def _send_album(bot: Bot, channel_id: str, photos: list, caption: str | None) -> int | None:
     """Отправить фото альбомами по MAX_ALBUM штук (Telegram не примет >10 разом).
 
     Подпись ставится на первое фото первого альбома. Возвращает id первого
@@ -90,7 +91,7 @@ async def _send_album(bot: Bot, channel_id: str, photos: list[str], caption: str
 
 
 async def _send_post(
-    bot: Bot, channel_id: str, text: str, photos: list[str], reply_markup=None
+    bot: Bot, channel_id: str, text: str, photos: list, reply_markup=None
 ) -> int:
     """Отправить пост и вернуть id сообщения, несущего описание (для будущих правок).
 
@@ -149,7 +150,8 @@ async def publish_property(bot: Bot, session: AsyncSession, property_id: str) ->
 
     text = get_ai_service().generate_description(_prop_to_dict(prop))
     kb = await _lead_kb(bot, prop.id)
-    post_id = await _send_post(bot, get_settings().channel_id, text, prop.photo_list, reply_markup=kb)
+    media = await watermark_photos(bot, prop.photo_list)
+    post_id = await _send_post(bot, get_settings().channel_id, text, media, reply_markup=kb)
 
     prop.channel_post_id = post_id
     prop.status = PropertyStatus.active
@@ -225,7 +227,8 @@ async def bump_property(bot: Bot, session: AsyncSession, property_id: str) -> Pr
 
     # Публикуем свежий пост
     kb = await _lead_kb(bot, prop.id)
-    post_id = await _send_post(bot, channel_id, text, prop.photo_list, reply_markup=kb)
+    media = await watermark_photos(bot, prop.photo_list)
+    post_id = await _send_post(bot, channel_id, text, media, reply_markup=kb)
     prop.channel_post_id = post_id
     prop.last_bump = timeutils.now()
     await session.commit()

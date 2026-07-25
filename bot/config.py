@@ -36,6 +36,10 @@ AGENCY_CONTACTS = [
 CHANNEL_URL = "https://t.me/fargona_UYJOY0"
 BOT_PUBLISH_URL = "https://t.me/fargona_realtor_bot?start=add"
 
+# Водяной знак на фото при публикации в канал (пусто → выключен).
+# Можно переопределить переменной окружения WATERMARK_TEXT.
+WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "Фарғона Уйлари")
+
 
 class Settings:
     def __init__(self) -> None:
