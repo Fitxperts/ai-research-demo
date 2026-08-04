@@ -52,6 +52,13 @@ class Settings:
         self.database_url: str = os.environ["DATABASE_URL"]
         self.redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
+        # Webhook (опционально). Если WEBHOOK_URL задан — бот работает через
+        # webhook (Telegram сам присылает апдейты, без пауз приёма); иначе — polling.
+        self.webhook_url: str = os.getenv("WEBHOOK_URL", "").strip()
+        self.webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook")
+        self.webhook_secret: str = os.getenv("WEBHOOK_SECRET", "").strip()
+        self.webhook_port: int = int(os.getenv("WEBHOOK_PORT", "8080"))
+
         # LLM (провайдеро-независимо). Приоритет:
         #  1) LLM_BASE_URL + LLM_API_KEY → любой OpenAI-совместимый провайдер
         #     (Groq / Google Gemini / DeepSeek / OpenRouter / OpenAI …);

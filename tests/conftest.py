@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 
 # Переменные окружения нужны до импорта пакета bot (config читает их)
-os.environ.setdefault("BOT_TOKEN", "test:token")
+os.environ.setdefault("BOT_TOKEN", "123456789:TESTtokenABCDEFGHIJKLMNOPQRSTUVWXYZ12")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")

@@ -49,48 +49,34 @@ def _register_error_handler(dp: Dispatcher, bot: Bot, settings) -> None:
         return True  # ошибка обработана
 
 
-async def main() -> None:
-    settings = get_settings()
-
-    init_sentry()
-
-    # Схема БД применяется миграциями Alembic (alembic upgrade head) до старта бота.
-
+def _build(settings) -> tuple[Bot, Dispatcher, RedisStorage]:
+    """Общая сборка бота, диспетчера и middleware (для polling и webhook)."""
     # Устойчивая к «плавающей» сети сессия: только IPv4 (обход мёртвого IPv6
-    # до api.telegram.org) + таймаут установки коннекта 10 сек, чтобы сбойный
-    # маршрут отваливался быстро, а не держал бота в «молчании».
+    # до api.telegram.org) + короткие таймауты + автоповтор отправки.
     bot = Bot(
         token=settings.bot_token,
         session=RobustSession(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-
-    # FSM-хранилище состояний в Redis
     storage = RedisStorage.from_url(settings.redis_url)
     dp = Dispatcher(storage=storage)
 
-    # Прокидываем сессию БД во все хендлеры
     dp.update.middleware(DbSessionMiddleware())
-
-    # Определение языка пользователя (после сессии — читает bot_users)
     dp.message.middleware(LanguageMiddleware())
     dp.callback_query.middleware(LanguageMiddleware())
-
-    # Антифлуд на сообщения и колбэки
     dp.message.middleware(ThrottlingMiddleware())
     dp.callback_query.middleware(ThrottlingMiddleware())
 
-    # Роутеры: клиент, собственник, админ
     register_routers(dp)
-
-    # Глобальный обработчик ошибок
     _register_error_handler(dp, bot, settings)
+    return bot, dp, storage
 
-    # Планировщик фоновых задач
+
+async def _run_polling(settings) -> None:
+    bot, dp, storage = _build(settings)
     scheduler = setup_scheduler(bot)
     scheduler.start()
-
-    logger.info("РиелторБот запущен")
+    logger.info("РиелторБот запущен (polling)")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_my_commands(_COMMANDS)
@@ -103,8 +89,56 @@ async def main() -> None:
         logger.info("РиелторБот остановлен")
 
 
+def _run_webhook(settings) -> None:
+    """Режим webhook: Telegram сам присылает апдейты (нет пауз приёма).
+
+    Бот слушает внутренний HTTP-порт; TLS и публичный домен обеспечивает
+    реверс-прокси (Caddy) — см. docker-compose.webhook.yml.
+    """
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+    from aiohttp import web
+
+    bot, dp, storage = _build(settings)
+    scheduler = setup_scheduler(bot)
+    webhook_url = settings.webhook_url.rstrip("/") + settings.webhook_path
+    secret = settings.webhook_secret or None
+
+    async def on_startup(bot: Bot) -> None:
+        scheduler.start()
+        await bot.set_webhook(
+            webhook_url,
+            secret_token=secret,
+            drop_pending_updates=True,
+            allowed_updates=dp.resolve_used_update_types(),
+        )
+        await bot.set_my_commands(_COMMANDS)
+        logger.info("РиелторБот запущен (webhook: %s)", webhook_url)
+
+    async def on_shutdown(bot: Bot) -> None:
+        scheduler.shutdown(wait=False)
+        await storage.close()
+        await bot.session.close()
+        logger.info("РиелторБот остановлен")
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=secret).register(
+        app, path=settings.webhook_path
+    )
+    setup_application(app, dp, bot=bot)
+    web.run_app(app, host="0.0.0.0", port=settings.webhook_port)
+
+
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Завершение работы по сигналу")
+    _settings = get_settings()
+    init_sentry()
+    # Схема БД применяется миграциями Alembic (alembic upgrade head) до старта.
+    if _settings.webhook_url:
+        _run_webhook(_settings)
+    else:
+        try:
+            asyncio.run(_run_polling(_settings))
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Завершение работы по сигналу")

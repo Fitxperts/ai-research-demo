@@ -1,0 +1,5 @@
+# Реверс-прокси с авто-TLS (Let's Encrypt). Домен берётся из переменной DOMAIN
+# (env_file: .env). Caddy сам получает и продлевает сертификат.
+{$DOMAIN} {
+    reverse_proxy bot:8080
+}

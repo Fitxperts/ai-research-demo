@@ -25,6 +25,21 @@ docker compose up --build
 | `REDIS_URL` | `redis://redis:6379/0` |
 | `ANTHROPIC_API_KEY` | ключ Anthropic |
 
+## Режим webhook (опционально)
+
+По умолчанию бот работает через **polling**. Чтобы убрать паузы приёма при
+нестабильной сети, можно включить **webhook** (Telegram сам присылает апдейты):
+
+1. Домен → A-запись на IP сервера; порты 80 и 443 открыты.
+2. В `.env`: `DOMAIN=bot.example.com`, `WEBHOOK_URL=https://bot.example.com`,
+   `WEBHOOK_SECRET=<случайная строка>`, `WEBHOOK_PORT=8080`.
+3. Запуск с реверс-прокси Caddy (авто-TLS Let's Encrypt):
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.webhook.yml up --build -d
+   ```
+
+Если `WEBHOOK_URL` пуст — бот остаётся на polling, ничего не меняется.
+
 ## Миграции (Alembic)
 
 Схемой БД управляет Alembic (не `create_all`).
