@@ -33,10 +33,12 @@ docker compose up --build
 1. Домен → A-запись на IP сервера; порты 80 и 443 открыты.
 2. В `.env`: `DOMAIN=bot.example.com`, `WEBHOOK_URL=https://bot.example.com`,
    `WEBHOOK_SECRET=<случайная строка>`, `WEBHOOK_PORT=8080`.
-3. Запуск с реверс-прокси Caddy (авто-TLS Let's Encrypt):
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.webhook.yml up --build -d
-   ```
+3. Запуск:
+   - **Свободные 80/443** → Caddy (авто-TLS): `docker compose -f docker-compose.yml -f docker-compose.webhook.yml up --build -d`
+   - **Уже есть Nginx Proxy Manager / другой прокси на 80/443** → без Caddy,
+     через NPM: задать `NPM_NETWORK` в `.env`, запустить
+     `docker compose -f docker-compose.yml -f docker-compose.npm.yml up --build -d`,
+     и добавить в NPM Proxy Host: домен → `Forward Hostname: realtor-bot`, порт `8080`.
 
 Если `WEBHOOK_URL` пуст — бот остаётся на polling, ничего не меняется.
 

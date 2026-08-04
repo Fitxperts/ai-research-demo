@@ -1,0 +1,33 @@
+# Override для webhook ЧЕРЕЗ существующий Nginx Proxy Manager (без Caddy).
+# Порты 80/443 остаются за NPM — бот их не трогает.
+#
+# Запуск:
+#   docker compose -f docker-compose.yml -f docker-compose.npm.yml up --build -d
+#
+# Требуется в .env:
+#   NPM_NETWORK=<имя docker-сети Nginx Proxy Manager>
+#   WEBHOOK_URL=https://realtor.flowence.store
+#   WEBHOOK_SECRET=<случайная строка 30+ символов>
+#   WEBHOOK_PORT=8080
+# (DOMAIN не нужен — TLS выдаёт сам NPM.)
+#
+# Затем в UI Nginx Proxy Manager → Add Proxy Host:
+#   Domain Names:      realtor.flowence.store
+#   Forward Hostname:  realtor-bot        (сетевой алиас ниже)
+#   Forward Port:      8080
+#   Websockets Support: ON
+#   вкладка SSL → Request a new Let's Encrypt certificate + Force SSL
+services:
+  bot:
+    networks:
+      default: {}          # своя сеть (db/redis)
+      npm:                 # сеть Nginx Proxy Manager
+        aliases:
+          - realtor-bot    # стабильное имя для Forward Hostname в NPM
+    expose:
+      - "8080"
+
+networks:
+  npm:
+    external: true
+    name: ${NPM_NETWORK}
