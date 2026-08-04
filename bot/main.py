@@ -105,14 +105,20 @@ def _run_webhook(settings) -> None:
 
     async def on_startup(bot: Bot) -> None:
         scheduler.start()
-        await bot.set_webhook(
-            webhook_url,
-            secret_token=secret,
-            drop_pending_updates=True,
-            allowed_updates=dp.resolve_used_update_types(),
-        )
-        await bot.set_my_commands(_COMMANDS)
-        logger.info("РиелторБот запущен (webhook: %s)", webhook_url)
+        # set_webhook нефатален: если прокси/домен ещё не готовы, не роняем
+        # контейнер в рестарт — просто логируем; после готовности docker restart.
+        try:
+            await bot.set_webhook(
+                webhook_url,
+                secret_token=secret,
+                drop_pending_updates=True,
+                allowed_updates=dp.resolve_used_update_types(),
+            )
+            await bot.set_my_commands(_COMMANDS)
+            logger.info("РиелторБот запущен (webhook: %s)", webhook_url)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Не удалось установить webhook (%s). Проверьте домен/прокси и "
+                         "перезапустите бота. Веб-сервер запущен и ждёт.", exc)
 
     async def on_shutdown(bot: Bot) -> None:
         scheduler.shutdown(wait=False)
