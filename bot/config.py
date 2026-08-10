@@ -70,6 +70,22 @@ class Settings:
         self.anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "").strip()
         self.ai_model: str = os.getenv("AI_MODEL", "claude-opus-4-8")
 
+        # Vision (распознавание объявлений со скринов) — Google Gemini,
+        # OpenAI-совместимый эндпоинт. Если ключ пуст — функция просто выключена.
+        self.gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
+        self.vision_model: str = os.getenv("VISION_MODEL", "gemini-2.0-flash")
+        self.gemini_base_url: str = os.getenv(
+            "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
+        ).strip()
+
+        # Транскрипция голосовых (узбекский и др.) — Groq Whisper,
+        # OpenAI-совместимый эндпоинт. Пустой ключ → функция выключена.
+        self.groq_api_key: str = os.getenv("GROQ_API_KEY", "").strip()
+        self.whisper_model: str = os.getenv("WHISPER_MODEL", "whisper-large-v3")
+        self.groq_base_url: str = os.getenv(
+            "GROQ_BASE_URL", "https://api.groq.com/openai/v1"
+        ).strip()
+
         # Константы (дублируем на объекте настроек для удобного доступа)
         self.timezone: str = TIMEZONE
         self.bump_interval_days: int = BUMP_INTERVAL_DAYS

@@ -365,6 +365,26 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "🔎 Разбираю объявление…",
         "en": "🔎 Parsing the listing…",
     },
+    "owner_reading_image": {
+        "uz": "🖼 Rasmydagi eʼlonni oʻqiyapman…",
+        "ru": "🖼 Читаю объявление с картинки…",
+        "en": "🖼 Reading the listing from the image…",
+    },
+    "owner_image_failed": {
+        "uz": "Rasmda eʼlonni topa olmadim. Iltimos, eʼlon matnini yozib yuboring.",
+        "ru": "Не смог распознать объявление на картинке. Пришлите текст объявления.",
+        "en": "Couldn’t read the listing from the image. Please send the text.",
+    },
+    "owner_listening": {
+        "uz": "🎧 Ovozli xabaringizni tinglayapman…",
+        "ru": "🎧 Слушаю голосовое…",
+        "en": "🎧 Listening to your voice message…",
+    },
+    "owner_voice_failed": {
+        "uz": "Ovozli xabarni tushuna olmadim. Iltimos, matn bilan yuboring.",
+        "ru": "Не смог разобрать голосовое. Пришлите текстом.",
+        "en": "Couldn’t understand the voice message. Please send it as text.",
+    },
     "owner_need_deal": {
         "uz": "Bitim turini aniqlashtiring:",
         "ru": "Уточните тип сделки:",

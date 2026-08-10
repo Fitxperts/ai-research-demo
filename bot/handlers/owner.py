@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 
 from aiogram import Bot, F, Router
@@ -31,6 +32,8 @@ from bot.keyboards import owner_kb
 from bot.keyboards.admin_kb import moderation_kb
 from bot.services import duplicate_checker
 from bot.services.ai_service import get_ai_service
+from bot.services.transcribe import get_transcribe_service
+from bot.services.vision import get_vision_service
 from bot.states.owner_states import OwnerForm
 from bot.utils.formatters import format_property_brief, format_property_card
 from bot.utils.validators import is_valid_phone, parse_price
@@ -100,8 +103,17 @@ async def collect_media(message: Message, state: FSMContext, lang: str) -> None:
 
     if current == OwnerForm.raw.state:
         if caption and not data.get("_parsed"):
+            # Фото/альбом с подписью → фото объекта, подпись = текст объявления
             await state.update_data(_parsed=True)
             await _handle_listing(message, state, lang, caption)
+        elif (
+            not caption and not mg and not data.get("_parsed")
+            and not data.get("_vision_tried") and get_vision_service().is_enabled()
+        ):
+            # Одиночное фото без подписи в самом начале → скорее всего СКРИН
+            # объявления: распознаём текст с картинки (Vision).
+            await state.update_data(_vision_tried=True)
+            await _handle_screenshot(message, state, lang)
         elif not caption and first_in_group and not data.get("_parsed") and not data.get("_asked_text"):
             await state.update_data(_asked_text=True)
             await message.answer(i18n.t("owner_send_text", lang))
@@ -111,6 +123,64 @@ async def collect_media(message: Message, state: FSMContext, lang: str) -> None:
             reply_markup=owner_kb.photos_done_kb(lang),
         )
     # В остальных состояниях медиа тихо копится (стрелки альбома после разбора).
+
+
+async def _download(bot: Bot, file_id: str) -> bytes:
+    buf = io.BytesIO()
+    await bot.download(file_id, destination=buf)
+    return buf.getvalue()
+
+
+async def _handle_screenshot(message: Message, state: FSMContext, lang: str) -> None:
+    """Скрин объявления → Vision извлекает текст → обычный разбор. Картинку-скрин
+    не оставляем как фото объекта."""
+    async with _media_lock:
+        data = await state.get_data()
+        screenshot_id = message.photo[-1].file_id
+        photos = [p for p in data.get("photos", []) if p != screenshot_id]
+        await state.update_data(photos=photos)
+
+    await message.answer(i18n.t("owner_reading_image", lang))
+    try:
+        image = await _download(message.bot, message.photo[-1].file_id)
+        text = await get_vision_service().extract_listing_text(image)
+    except Exception:  # noqa: BLE001
+        logger.exception("Не удалось скачать/распознать скрин")
+        text = None
+
+    if text:
+        await state.update_data(_parsed=True)
+        await _handle_listing(message, state, lang, text)
+    else:
+        # Не распознали — просим текст; фото не считаем объявлением
+        await state.update_data(_vision_tried=False)
+        await message.answer(i18n.t("owner_image_failed", lang))
+
+
+@router.message(OwnerForm.raw, F.voice | F.audio)
+async def listing_voice(message: Message, state: FSMContext, lang: str) -> None:
+    """Голосовое объявление → транскрипция (Whisper) → обычный разбор."""
+    data = await state.get_data()
+    if data.get("_parsed"):
+        return
+    if not get_transcribe_service().is_enabled():
+        await message.answer(i18n.t("owner_send_text", lang))
+        return
+    await state.update_data(_parsed=True)
+    await message.answer(i18n.t("owner_listening", lang))
+    file_id = message.voice.file_id if message.voice else message.audio.file_id
+    try:
+        audio = await _download(message.bot, file_id)
+        text = await get_transcribe_service().transcribe(audio)
+    except Exception:  # noqa: BLE001
+        logger.exception("Не удалось скачать/расшифровать голосовое")
+        text = None
+
+    if text:
+        await _handle_listing(message, state, lang, text)
+    else:
+        await state.update_data(_parsed=False)
+        await message.answer(i18n.t("owner_voice_failed", lang))
 
 
 # ---------------------------------------------------------------------------
