@@ -42,6 +42,22 @@ docker compose up --build
 
 Если `WEBHOOK_URL` пуст — бот остаётся на polling, ничего не меняется.
 
+## Авто-репост из чужих каналов (юзербот)
+
+Отдельный процесс на Telethon мониторит каналы партнёров/конкурентов, разбирает
+объявления ИИ, переделывает под шаблон агентства (с водяным знаком) и отдаёт
+в модерацию или сразу в канал. Бот сам читать чужие каналы не может — нужен
+аккаунт-«читатель».
+
+1. Получи `API_ID`/`API_HASH` на https://my.telegram.org.
+2. Один раз сгенерируй сессию: `python scripts/userbot_login.py` → строка в `USERBOT_SESSION`.
+3. В `.env`: `USERBOT_ENABLED=true`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`,
+   `USERBOT_SESSION`, `SOURCE_CHANNELS=@a,@b`, `AUTOREPOST_MODE=moderate|auto`.
+4. Запуск (добавь override): `... -f docker-compose.userbot.yml up -d --build`.
+
+⚠️ Юзерботы формально против ToS Telegram — используй ОТДЕЛЬНЫЙ номер. Репост
+чужого контента — на твоё усмотрение и ответственность.
+
 ## Миграции (Alembic)
 
 Схемой БД управляет Alembic (не `create_all`).

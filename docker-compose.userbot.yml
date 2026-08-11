@@ -1,0 +1,21 @@
+# Override для авто-репоста из чужих каналов (задача 7). Отдельный процесс —
+# юзербот на Telethon. Запуск (можно вместе с webhook/npm):
+#   docker compose -f docker-compose.yml -f docker-compose.npm.yml -f docker-compose.userbot.yml up -d --build
+# или (проще) добавь COMPOSE_FILE в .env, см. README.
+#
+# Требуется в .env: USERBOT_ENABLED=true, TELEGRAM_API_ID, TELEGRAM_API_HASH,
+# USERBOT_SESSION (получить через scripts/userbot_login.py), SOURCE_CHANNELS,
+# AUTOREPOST_MODE (moderate|auto).
+services:
+  userbot:
+    build: .
+    env_file: .env
+    command: ["sh", "-c", "sleep 15 && python -m bot.userbot"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./media:/app/media   # общий том с ботом: фото для публикации

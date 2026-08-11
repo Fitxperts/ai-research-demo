@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 
 from aiogram import Bot
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile
 
 from bot.config import WATERMARK_TEXT
 
@@ -62,18 +63,30 @@ def stamp(image_bytes: bytes, text: str) -> bytes:
     return out.getvalue()
 
 
-async def watermark_photos(bot: Bot, file_ids: list[str]) -> list:
-    """file_id → BufferedInputFile с водяным знаком. При сбое — исходный file_id."""
-    if not WATERMARK_TEXT:
-        return list(file_ids)
+async def watermark_photos(bot: Bot, sources: list[str]) -> list:
+    """Источник (file_id ИЛИ локальный путь) → сендабельный объект с водяным знаком.
+
+    - обычные объявления: приходят file_id (качаем через бота);
+    - авто-репост: приходят локальные пути (фото уже скачаны на общий том).
+    При выключенном знаке или сбое — отдаём оригинал (file_id / FSInputFile).
+    """
     result: list = []
-    for fid in file_ids:
+    for src in sources:
+        is_path = isinstance(src, str) and os.path.exists(src)
+        if not WATERMARK_TEXT:
+            result.append(FSInputFile(src) if is_path else src)
+            continue
         try:
-            buf = io.BytesIO()
-            await bot.download(fid, destination=buf)
-            data = stamp(buf.getvalue(), WATERMARK_TEXT)
+            if is_path:
+                with open(src, "rb") as fh:
+                    raw = fh.read()
+            else:
+                buf = io.BytesIO()
+                await bot.download(src, destination=buf)
+                raw = buf.getvalue()
+            data = stamp(raw, WATERMARK_TEXT)
             result.append(BufferedInputFile(data, filename="photo.jpg"))
         except Exception:  # noqa: BLE001 - любой сбой → публикуем оригинал
-            logger.debug("Водяной знак пропущен для %s (откат к оригиналу)", fid)
-            result.append(fid)
+            logger.debug("Водяной знак пропущен для %s (откат к оригиналу)", src)
+            result.append(FSInputFile(src) if is_path else src)
     return result

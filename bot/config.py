@@ -86,9 +86,35 @@ class Settings:
             "GROQ_BASE_URL", "https://api.groq.com/openai/v1"
         ).strip()
 
+        # Авто-репост из чужих каналов (юзербот Telethon). Пусто/выключено →
+        # сервис не запускается. Логин один раз генерирует USERBOT_SESSION.
+        self.userbot_enabled: bool = os.getenv("USERBOT_ENABLED", "").strip().lower() in ("1", "true", "yes")
+        self.telegram_api_id: int = int(os.getenv("TELEGRAM_API_ID", "0") or 0)
+        self.telegram_api_hash: str = os.getenv("TELEGRAM_API_HASH", "").strip()
+        self.userbot_session: str = os.getenv("USERBOT_SESSION", "").strip()
+        self.source_channels: list[str] = self._parse_channels(os.getenv("SOURCE_CHANNELS", ""))
+        # moderate — авто-импорт в модерацию (безопасно); auto — сразу в канал.
+        self.autorepost_mode: str = os.getenv("AUTOREPOST_MODE", "moderate").strip().lower()
+        self.autorepost_max_photos: int = int(os.getenv("AUTOREPOST_MAX_PHOTOS", "10") or 10)
+        self.media_dir: str = os.getenv("MEDIA_DIR", "/app/media").strip()
+
         # Константы (дублируем на объекте настроек для удобного доступа)
         self.timezone: str = TIMEZONE
         self.bump_interval_days: int = BUMP_INTERVAL_DAYS
+
+    @staticmethod
+    def _parse_channels(raw: str) -> list[str]:
+        """@name / t.me/name / id → нормализованный список источников."""
+        out: list[str] = []
+        for part in raw.replace(" ", "").split(","):
+            if not part:
+                continue
+            part = part.rsplit("/", 1)[-1]  # t.me/xxx → xxx
+            if part.lstrip("-").isdigit():
+                out.append(part)  # числовой id канала
+            else:
+                out.append(part if part.startswith("@") else "@" + part)
+        return out
 
     @staticmethod
     def _parse_admin_ids(raw: str) -> list[int]:

@@ -1,0 +1,186 @@
+"""Авто-репост из чужих каналов (юзербот на Telethon) — задача 7.
+
+Отдельный процесс: слушает каналы партнёров/конкурентов реальным аккаунтом
+(бот не может читать чужие каналы), фильтрует объявления, разбирает их ИИ,
+переделывает под шаблон агентства и:
+  - AUTOREPOST_MODE=moderate → создаёт объект в статусе «на модерации» и шлёт
+    админам карточку с кнопками (одобрить/редактировать/отклонить);
+  - AUTOREPOST_MODE=auto → сразу публикует в канал.
+
+Дедуп: по нормализованному тексту (Redis), плюс проверка на дубли в БД.
+Фото скачиваются на общий том (MEDIA_DIR), доступный и боту (для публикации).
+
+⚠️ Юзерботы формально против ToS Telegram — используйте ОТДЕЛЬНЫЙ номер, не
+личный. Репост чужого контента — на ваше усмотрение и ответственность.
+
+Запуск: python -m bot.userbot  (обычно отдельным docker-сервисом).
+Сначала один раз получите сессию: python scripts/userbot_login.py
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import FSInputFile
+
+from bot.config import get_settings
+from bot.database import crud
+from bot.database.session import get_sessionmaker
+from bot.keyboards.admin_kb import moderation_kb
+from bot.logging_setup import setup_logging
+from bot.net_session import RobustSession
+from bot.services import publisher
+from bot.services.ai_service import get_ai_service
+from bot.services.autorepost import content_key, looks_like_listing, to_property_fields
+from bot.services.duplicate_checker import check_duplicates
+from bot.utils.formatters import format_property_card
+
+setup_logging()
+logger = logging.getLogger(__name__)
+
+_SEEN_KEY = "autorepost:seen"
+
+
+def _chats(raw: list[str]) -> list:
+    """@name → строка, числовой id → int (Telethon принимает оба)."""
+    out: list = []
+    for c in raw:
+        out.append(int(c) if c.lstrip("-").isdigit() else c)
+    return out
+
+
+class AutoReposter:
+    def __init__(self, client, bot: Bot, redis) -> None:
+        self._client = client
+        self._bot = bot
+        self._redis = redis
+        self._settings = get_settings()
+        self._sessionmaker = get_sessionmaker()
+        self._dir = os.path.join(self._settings.media_dir, "autorepost")
+        os.makedirs(self._dir, exist_ok=True)
+
+    async def handle(self, text: str | None, photo_messages: list, source: str) -> None:
+        if not looks_like_listing(text):
+            return
+        key = content_key(text or "")
+        if await self._redis.sismember(_SEEN_KEY, key):
+            return
+        await self._redis.sadd(_SEEN_KEY, key)  # помечаем сразу — без гонок/повторов
+
+        parsed = await get_ai_service().parse_listing(text or "")
+        fields = to_property_fields(parsed)
+        if fields is None:
+            logger.info("Авто-репост: пропуск (не распознан тип сделки), источник %s", source)
+            return
+
+        async with self._sessionmaker() as session:
+            if await check_duplicates(session, fields):
+                logger.info("Авто-репост: дубль уже есть в базе, пропуск")
+                return
+
+            paths: list[str] = []
+            for i, msg in enumerate(photo_messages[: self._settings.autorepost_max_photos]):
+                path = os.path.join(self._dir, f"{key}_{i}.jpg")
+                try:
+                    await self._client.download_media(msg, file=path)
+                    paths.append(path)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Не удалось скачать фото %s из %s", i, source)
+            if paths:
+                fields["photos"] = ",".join(paths)
+            fields.setdefault("description", (text or "")[:800])
+
+            prop = await crud.create_property(session, **fields)
+            logger.info("Авто-репост: создан %s из %s (%d фото)", prop.id, source, len(paths))
+
+            if self._settings.autorepost_mode == "auto":
+                await publisher.publish_property(self._bot, session, prop.id)
+            else:
+                await self._notify_moderation(prop)
+            await session.commit()
+
+    async def _notify_moderation(self, prop) -> None:
+        text = "🤖 <b>Авто-импорт (на модерацию)</b>\n\n" + format_property_card(prop)
+        kb = moderation_kb(prop.id)
+        photos = prop.photo_list
+        for admin_id in self._settings.admin_ids:
+            try:
+                if photos and os.path.exists(photos[0]):
+                    await self._bot.send_photo(admin_id, FSInputFile(photos[0]), caption=text, reply_markup=kb)
+                elif photos:
+                    await self._bot.send_photo(admin_id, photos[0], caption=text, reply_markup=kb)
+                else:
+                    await self._bot.send_message(admin_id, text, reply_markup=kb)
+            except Exception:  # noqa: BLE001
+                logger.debug("Не удалось уведомить админа %s", admin_id)
+
+
+async def main() -> None:
+    settings = get_settings()
+    # На ранних выходах спим 30с — чтобы docker restart не крутил тугой цикл,
+    # пока .env донастраивают.
+    if not settings.userbot_enabled:
+        logger.info("Юзербот выключен (USERBOT_ENABLED не задан)")
+        await asyncio.sleep(30)
+        return
+    if not (settings.telegram_api_id and settings.telegram_api_hash and settings.userbot_session):
+        logger.error("Юзербот: нет TELEGRAM_API_ID / TELEGRAM_API_HASH / USERBOT_SESSION")
+        await asyncio.sleep(30)
+        return
+    if not settings.source_channels:
+        logger.error("Юзербот: не задан SOURCE_CHANNELS — нечего слушать")
+        await asyncio.sleep(30)
+        return
+
+    import redis.asyncio as aioredis
+    from telethon import TelegramClient, events
+    from telethon.sessions import StringSession
+
+    client = TelegramClient(
+        StringSession(settings.userbot_session), settings.telegram_api_id, settings.telegram_api_hash
+    )
+    bot = Bot(token=settings.bot_token, session=RobustSession(),
+              default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    reposter = AutoReposter(client, bot, redis)
+    chats = _chats(settings.source_channels)
+
+    @client.on(events.Album(chats=chats))
+    async def _on_album(event) -> None:  # noqa: ANN001
+        photos = [m for m in event.messages if m.photo]
+        await reposter.handle(event.text, photos, _src(event))
+
+    @client.on(events.NewMessage(chats=chats, func=lambda e: not e.grouped_id))
+    async def _on_message(event) -> None:  # noqa: ANN001
+        photos = [event.message] if event.message.photo else []
+        await reposter.handle(event.raw_text, photos, _src(event))
+
+    await client.connect()
+    if not await client.is_user_authorized():
+        logger.error("Юзербот: сессия недействительна. Перегенерируйте USERBOT_SESSION "
+                     "через scripts/userbot_login.py")
+        await client.disconnect()
+        return
+
+    logger.info("Юзербот запущен. Слушаю каналы: %s (режим: %s)",
+                ", ".join(settings.source_channels), settings.autorepost_mode)
+    try:
+        await client.run_until_disconnected()
+    finally:
+        await bot.session.close()
+
+
+def _src(event) -> str:  # noqa: ANN001
+    chat = getattr(event, "chat", None)
+    return getattr(chat, "username", None) or str(getattr(event, "chat_id", "?"))
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Юзербот остановлен по сигналу")
