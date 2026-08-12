@@ -37,6 +37,7 @@ from bot.services import publisher
 from bot.services.ai_service import get_ai_service
 from bot.services.autorepost import content_key, looks_like_listing, to_property_fields
 from bot.services.duplicate_checker import check_duplicates
+from bot.services.vision import get_vision_service
 from bot.utils.formatters import format_property_card
 
 setup_logging()
@@ -63,10 +64,38 @@ class AutoReposter:
         self._dir = os.path.join(self._settings.media_dir, "autorepost")
         os.makedirs(self._dir, exist_ok=True)
 
+    async def _vision_text(self, msg) -> str | None:
+        """Прочитать объявление с картинки (для постов, где текст в фото)."""
+        if not get_vision_service().is_enabled():
+            return None
+        tmp = os.path.join(self._dir, "_vision_tmp.jpg")
+        try:
+            await self._client.download_media(msg, file=tmp)
+            with open(tmp, "rb") as fh:
+                data = fh.read()
+            return await get_vision_service().extract_listing_text(data)
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
     async def handle(self, text: str | None, photo_messages: list, source: str) -> None:
+        text = (text or "").strip()
+        logger.info("Авто-репост: сообщение из %s — %d фото, %d симв. текста",
+                    source, len(photo_messages), len(text))
+
+        # Если в подписи мало данных, но есть фото — читаем объявление с картинки.
+        if photo_messages and not looks_like_listing(text):
+            vtext = await self._vision_text(photo_messages[0])
+            if vtext:
+                text = (text + "\n" + vtext).strip()
+                logger.info("Авто-репост: текст дочитан с фото (Vision), теперь %d симв.", len(text))
+
         if not looks_like_listing(text):
+            logger.info("Авто-репост: не похоже на объявление — пропуск (%s)", source)
             return
-        key = content_key(text or "")
+        key = content_key(text)
         if await self._redis.sismember(_SEEN_KEY, key):
             return
         await self._redis.sadd(_SEEN_KEY, key)  # помечаем сразу — без гонок/повторов

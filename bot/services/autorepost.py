@@ -17,9 +17,10 @@ from bot.database.models import PropertyKind, PropertyStatus, PropertyType
 _ESTATE_WORDS = (
     "ижара", "ижарага", "аренда", "аренду", "сдается", "сдаётся", "сдам",
     "сотув", "сотилади", "продажа", "продается", "продаётся", "продам",
-    "квартира", "кв.", "хона", "уй", "ховли", "дом", "участок", "ер",
-    "ijara", "ijaraga", "sotuv", "sotiladi", "kvartira", "xona", "hovli", "uy",
-    "uchastka", "yer", "kproduct",
+    "квартира", "кв.", "хона", "хонали", "уй", "ховли", "дом", "участок", "ер",
+    "комнат", "этаж", "массив", "мкр",
+    "ijara", "ijaraga", "sotuv", "sotiladi", "soiladi", "sotladi", "sotib",
+    "kvartira", "xona", "xonali", "hovli", "uy", "uchastka", "yer", "qavat",
 )
 # Признаки цены/денег — усиливают уверенность.
 _MONEY_WORDS = ("сум", "сўм", "so'm", "som", "$", "у.е", "у.е.", "ye", "млн", "минг", "000")
@@ -32,7 +33,7 @@ def looks_like_listing(text: str | None) -> bool:
     if not text:
         return False
     low = text.lower()
-    if len(low) < 15:
+    if len(low) < 10:
         return False
     has_estate = any(w in low for w in _ESTATE_WORDS)
     has_money = any(w in low for w in _MONEY_WORDS) or bool(re.search(r"\d{3,}", low))
