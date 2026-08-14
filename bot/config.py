@@ -73,7 +73,7 @@ class Settings:
         # Vision (распознавание объявлений со скринов) — Google Gemini,
         # OpenAI-совместимый эндпоинт. Если ключ пуст — функция просто выключена.
         self.gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
-        self.vision_model: str = os.getenv("VISION_MODEL", "gemini-2.5-flash")
+        self.vision_model: str = os.getenv("VISION_MODEL", "gemini-flash-latest")
         self.gemini_base_url: str = os.getenv(
             "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
         ).strip()
