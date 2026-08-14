@@ -96,11 +96,18 @@ class AutoReposter:
             logger.info("Авто-репост: не похоже на объявление — пропуск (%s)", source)
             return
         key = content_key(text)
-        if await self._redis.sismember(_SEEN_KEY, key):
-            return
-        await self._redis.sadd(_SEEN_KEY, key)  # помечаем сразу — без гонок/повторов
+        try:
+            if await self._redis.sismember(_SEEN_KEY, key):
+                logger.info("Авто-репост: уже обрабатывали этот текст (дубль) — пропуск")
+                return
+            await self._redis.sadd(_SEEN_KEY, key)  # помечаем сразу — без гонок/повторов
+        except Exception:  # noqa: BLE001 - Redis недоступен не должен ронять обработку
+            logger.exception("Авто-репост: ошибка Redis (дедуп), продолжаю без него")
 
+        logger.info("Авто-репост: разбираю ИИ…")
         parsed = await get_ai_service().parse_listing(text or "")
+        logger.info("Авто-репост: разобрано — тип=%s, цена=%s, район=%s",
+                    parsed.get("deal_type"), parsed.get("price"), parsed.get("district"))
         fields = to_property_fields(parsed)
         if fields is None:
             logger.info("Авто-репост: пропуск (не распознан тип сделки), источник %s", source)
@@ -202,14 +209,20 @@ async def main() -> None:
     async def _on_album(event) -> None:  # noqa: ANN001
         if event.chat_id not in allowed:
             return
-        photos = [m for m in event.messages if m.photo]
-        await reposter.handle(event.text, photos, _src(event))
+        try:
+            photos = [m for m in event.messages if m.photo]
+            await reposter.handle(event.text, photos, _src(event))
+        except Exception:  # noqa: BLE001
+            logger.exception("Авто-репост: ошибка обработки альбома")
 
     async def _on_message(event) -> None:  # noqa: ANN001
         if event.chat_id not in allowed:
             return
-        photos = [event.message] if event.message.photo else []
-        await reposter.handle(event.raw_text, photos, _src(event))
+        try:
+            photos = [event.message] if event.message.photo else []
+            await reposter.handle(event.raw_text, photos, _src(event))
+        except Exception:  # noqa: BLE001
+            logger.exception("Авто-репост: ошибка обработки сообщения")
 
     client.add_event_handler(_on_album, events.Album())
     client.add_event_handler(_on_message, events.NewMessage(func=lambda e: not e.grouped_id))
