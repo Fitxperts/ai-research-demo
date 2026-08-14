@@ -176,18 +176,6 @@ async def main() -> None:
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     reposter = AutoReposter(client, bot, redis)
-    chats = _chats(settings.source_channels)
-
-    @client.on(events.Album(chats=chats))
-    async def _on_album(event) -> None:  # noqa: ANN001
-        photos = [m for m in event.messages if m.photo]
-        await reposter.handle(event.text, photos, _src(event))
-
-    @client.on(events.NewMessage(chats=chats, func=lambda e: not e.grouped_id))
-    async def _on_message(event) -> None:  # noqa: ANN001
-        photos = [event.message] if event.message.photo else []
-        await reposter.handle(event.raw_text, photos, _src(event))
-
     await client.connect()
     if not await client.is_user_authorized():
         logger.error("Юзербот: сессия недействительна. Перегенерируйте USERBOT_SESSION "
@@ -195,8 +183,40 @@ async def main() -> None:
         await client.disconnect()
         return
 
-    logger.info("Юзербот запущен. Слушаю каналы: %s (режим: %s)",
-                ", ".join(settings.source_channels), settings.autorepost_mode)
+    # Прогреваем кэш диалогов и резолвим источники в id — надёжнее фильтра chats=
+    # у Telethon (юзернейм часто «молча» не совпадает при фильтрации апдейтов).
+    from telethon import utils
+    try:
+        await client.get_dialogs()
+    except Exception:  # noqa: BLE001
+        pass
+    allowed: set[int] = set()
+    for ch in _chats(settings.source_channels):
+        try:
+            ent = await client.get_entity(ch)
+            allowed.add(utils.get_peer_id(ent))
+            logger.info("Источник подключён: %s (id=%s)", getattr(ent, "title", ch), utils.get_peer_id(ent))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Источник %s НЕ найден (аккаунт подписан? верный @username/id?): %s", ch, exc)
+
+    async def _on_album(event) -> None:  # noqa: ANN001
+        if event.chat_id not in allowed:
+            return
+        photos = [m for m in event.messages if m.photo]
+        await reposter.handle(event.text, photos, _src(event))
+
+    async def _on_message(event) -> None:  # noqa: ANN001
+        if event.chat_id not in allowed:
+            return
+        photos = [event.message] if event.message.photo else []
+        await reposter.handle(event.raw_text, photos, _src(event))
+
+    client.add_event_handler(_on_album, events.Album())
+    client.add_event_handler(_on_message, events.NewMessage(func=lambda e: not e.grouped_id))
+
+    if not allowed:
+        logger.error("Юзербот: НИ ОДИН источник не подключён — проверьте SOURCE_CHANNELS и подписки аккаунта")
+    logger.info("Юзербот запущен. Каналов подключено: %d (режим: %s)", len(allowed), settings.autorepost_mode)
     try:
         await client.run_until_disconnected()
     finally:
