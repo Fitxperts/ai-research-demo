@@ -89,8 +89,9 @@ class AIService:
                 logger.info("LLM: Anthropic, модель %s", self._model)
             else:
                 logger.warning("LLM не настроен — офлайн-режим (разбор регулярками)")
-        except Exception:  # noqa: BLE001 - библиотека/сеть недоступны
-            logger.warning("LLM SDK недоступен, используются офлайн-режимы")
+        except Exception as exc:  # noqa: BLE001 - библиотека/сеть недоступны
+            logger.warning("LLM SDK недоступен (%s: %s), используются офлайн-режимы",
+                           type(exc).__name__, exc)
             self._client = None
             self._backend = None
 
