@@ -75,10 +75,16 @@ class AIService:
                 # Любой OpenAI-совместимый провайдер: Groq / Gemini / DeepSeek / …
                 from openai import AsyncOpenAI
 
-                self._client = AsyncOpenAI(
-                    api_key=settings.llm_api_key or "not-needed",
-                    base_url=settings.llm_base_url,
-                )
+                # Ключ: LLM_API_KEY, иначе — по провайдеру из GEMINI/GROQ_API_KEY.
+                key = settings.llm_api_key
+                if not key and "generativelanguage.googleapis.com" in settings.llm_base_url:
+                    key = settings.gemini_api_key
+                elif not key and "api.groq.com" in settings.llm_base_url:
+                    key = settings.groq_api_key
+                if not key:
+                    logger.warning("LLM_BASE_URL задан, но ключа нет "
+                                   "(LLM_API_KEY / GEMINI_API_KEY / GROQ_API_KEY)")
+                self._client = AsyncOpenAI(api_key=key or "not-needed", base_url=settings.llm_base_url)
                 self._backend = "openai"
                 logger.info("LLM: OpenAI-совместимый провайдер, модель %s", self._model)
             elif settings.anthropic_api_key:
