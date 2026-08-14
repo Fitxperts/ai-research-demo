@@ -47,7 +47,7 @@ _media_lock = asyncio.Lock()
 
 # Поля из разбора объявления, переносимые в состояние
 _LISTING_FIELDS = ("deal_type", "property_kind", "rooms", "district", "address",
-                   "area", "floor", "floors", "description")
+                   "area", "floor", "floors", "currency", "description")
 
 # Состояния, в которых по-прежнему принимаем медиа (фото/видео) из объявления/альбома
 _MEDIA_STATES = (
@@ -384,7 +384,7 @@ async def _save_property(
         floors=data.get("floors"),
         renovation=data.get("renovation"),
         price=data.get("price"),
-        currency="сум",
+        currency=data.get("currency") or "сум",
         description=description,
         photos=",".join(photos),
         video=data.get("video"),

@@ -227,7 +227,7 @@ class AIService:
     # ------------------------------------------------------------------
     _LISTING_KEYS = (
         "deal_type", "property_kind", "rooms", "district", "address",
-        "area", "floor", "floors", "price", "phone", "description",
+        "area", "floor", "floors", "price", "currency", "phone", "description",
     )
 
     async def parse_listing(self, text: str) -> dict:
@@ -262,8 +262,9 @@ class AIService:
             "дома/остановки/компании. Если есть хоть какой-то намёк на место — "
             "ОБЯЗАТЕЛЬНО занеси его сюда, НЕ оставляй пустым и НЕ выдумывай новое,\n"
             "area (число, м²), floor (этаж, целое), floors (этажность, целое),\n"
-            "price (число без пробелов и валюты; 'лям'/'млн'/'миллион' → миллионы, "
-            "'к'/'минг'/'тыс' → тысячи),\n"
+            "price (ЧИСЛО без пробелов и валюты; '67.000' и '67 000' → 67000; "
+            "'лям'/'млн'/'миллион' → миллионы, 'к'/'минг'/'тыс' → тысячи),\n"
+            "currency ('$' если доллар/у.е/$/USD; иначе 'сум'),\n"
             "phone (строка),\n"
             "description — аккуратное описание объекта в деловом стиле агентства "
             "на русском (2–4 предложения), без телефонов, ссылок, мусорных эмодзи "
@@ -302,6 +303,9 @@ class AIService:
                     result[key] = float(str(value).replace(" ", "").replace(",", "."))
                 except (TypeError, ValueError):
                     continue
+            elif key == "currency":
+                low = str(value).lower()
+                result[key] = "$" if any(s in low for s in ("$", "usd", "доллар", "у.е")) else "сум"
             else:
                 result[key] = str(value).strip()
         return result

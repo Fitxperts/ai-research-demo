@@ -60,7 +60,7 @@ def to_property_fields(parsed: dict) -> dict | None:
         "type": PropertyType(deal),
         "property_kind": PropertyKind(kind),
         "status": PropertyStatus.pending,
-        "currency": "сум",
+        "currency": parsed.get("currency") or "сум",
     }
     for key in ("district", "address", "rooms", "area", "floor", "floors", "price", "description"):
         value = parsed.get(key)
