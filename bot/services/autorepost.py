@@ -62,11 +62,16 @@ def to_property_fields(parsed: dict) -> dict | None:
         "status": PropertyStatus.pending,
         "currency": parsed.get("currency") or "сум",
     }
+    # лимиты varchar-колонок БД, чтобы длинные значения не роняли вставку
+    _caps = {"district": 128, "address": 255}
     for key in ("district", "address", "rooms", "area", "floor", "floors", "price", "description"):
         value = parsed.get(key)
-        if value is not None:
-            fields[key] = value
+        if value is None:
+            continue
+        if key in _caps:
+            value = str(value)[: _caps[key]]
+        fields[key] = value
     phone = parsed.get("phone")
     if phone:
-        fields["owner_phone"] = phone
+        fields["owner_phone"] = str(phone)[:32]
     return fields

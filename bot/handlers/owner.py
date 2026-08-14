@@ -203,7 +203,7 @@ async def _handle_listing(message: Message, state: FSMContext, lang: str, text: 
     if parsed.get("price") is not None:
         update["price"] = parsed["price"]
     if parsed.get("phone"):
-        update["owner_phone"] = parsed["phone"]
+        update["owner_phone"] = str(parsed["phone"])[:32]
     # Слияние под тем же локом, что и добавление медиа, — не теряем стрелки альбома.
     async with _media_lock:
         await state.update_data(**update)

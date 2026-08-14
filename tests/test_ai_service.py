@@ -69,3 +69,22 @@ def test_find_matches_budget_and_filters():
     ]
     ids = [p["id"] for p in svc.find_matches(client, props)]
     assert ids == ["A1"]
+
+
+def test_normalize_listing_caps_phone_and_currency():
+    """Несколько телефонов → один, ≤32 симв.; валюта $ распознаётся; длинные строки режутся."""
+    from bot.services.ai_service import AIService
+
+    data = {
+        "deal_type": "sale",
+        "phone": "+998885199595 +998942101222 +998931112070",  # три номера
+        "currency": "570 млн сўм (= 47,500$)",
+        "district": "Я" * 300,   # заведомо длиннее 128
+        "price": "570000000",
+    }
+    out = AIService._normalize_listing(data)
+    assert len(out["owner_phone" if "owner_phone" in out else "phone"]) <= 32
+    assert out["phone"].startswith("+998885199595")
+    assert out["currency"] == "$"
+    assert len(out["district"]) <= 128
+    assert out["price"] == 570000000.0

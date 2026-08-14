@@ -306,8 +306,15 @@ class AIService:
             elif key == "currency":
                 low = str(value).lower()
                 result[key] = "$" if any(s in low for s in ("$", "usd", "доллар", "у.е")) else "сум"
+            elif key == "phone":
+                # берём ПЕРВЫЙ телефон (в объявлении их может быть несколько) и режем под лимит БД
+                match = re.search(r"\+?\d[\d\s\-()]{6,}\d", str(value))
+                result[key] = (match.group().strip() if match else str(value).strip())[:32]
             else:
-                result[key] = str(value).strip()
+                # режем строковые поля под лимиты колонок БД (varchar)
+                limit = {"district": 128, "address": 255, "description": 4000}.get(key)
+                cleaned = str(value).strip()
+                result[key] = cleaned[:limit] if limit else cleaned
         return result
 
     @staticmethod
