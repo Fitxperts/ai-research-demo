@@ -103,22 +103,48 @@ def _run_webhook(settings) -> None:
     webhook_url = settings.webhook_url.rstrip("/") + settings.webhook_path
     secret = settings.webhook_secret or None
 
+    async def _set_webhook(drop: bool) -> None:
+        await bot.set_webhook(
+            webhook_url, secret_token=secret,
+            drop_pending_updates=drop, allowed_updates=dp.resolve_used_update_types(),
+        )
+
+    async def _webhook_watchdog() -> None:
+        """Каждые 30 мин проверяем вебхук и восстанавливаем, если слетел.
+
+        Страхует от «тихой смерти»: если set_webhook когда-то не прошёл (NPM/серт
+        были недоступны) — вебхук восстановится сам, без ручного вмешательства.
+        """
+        while True:
+            await asyncio.sleep(1800)
+            try:
+                info = await bot.get_webhook_info()
+                if (info.url or "") != webhook_url:
+                    logger.warning("Webhook слетел (url=%r) — переустанавливаю", info.url)
+                    await _set_webhook(drop=False)
+                    logger.info("Webhook восстановлен watchdog'ом")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Watchdog webhook: %s", exc)
+
     async def on_startup(bot: Bot) -> None:
         scheduler.start()
-        # set_webhook нефатален: если прокси/домен ещё не готовы, не роняем
-        # контейнер в рестарт — просто логируем; после готовности docker restart.
-        try:
-            await bot.set_webhook(
-                webhook_url,
-                secret_token=secret,
-                drop_pending_updates=True,
-                allowed_updates=dp.resolve_used_update_types(),
-            )
-            await bot.set_my_commands(_COMMANDS)
-            logger.info("РиелторБот запущен (webhook: %s)", webhook_url)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Не удалось установить webhook (%s). Проверьте домен/прокси и "
-                         "перезапустите бота. Веб-сервер запущен и ждёт.", exc)
+        # set_webhook нефатален, НО с автоповтором: прокси/сертификат (NPM) при
+        # старте могут быть ещё не готовы — раньше это приводило к «тихому»
+        # зависанию без вебхука. Теперь ретраим с нарастающей паузой + watchdog.
+        for attempt in range(1, 8):
+            try:
+                await _set_webhook(drop=True)
+                await bot.set_my_commands(_COMMANDS)
+                logger.info("РиелторБот запущен (webhook: %s)", webhook_url)
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.error("set_webhook: попытка %d/7 не удалась (%s), повтор через %dс",
+                             attempt, exc, min(60, 10 * attempt))
+                await asyncio.sleep(min(60, 10 * attempt))
+        else:
+            logger.error("Webhook не установлен после 7 попыток — watchdog продолжит попытки. "
+                         "Проверьте домен/NPM/сертификат.")
+        asyncio.create_task(_webhook_watchdog())
 
     async def on_shutdown(bot: Bot) -> None:
         scheduler.shutdown(wait=False)
