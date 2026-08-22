@@ -415,7 +415,7 @@ def _build_preview(data: dict) -> Property:
         floors=data.get("floors"),
         renovation=data.get("renovation"),
         price=data.get("price"),
-        currency="сум",
+        currency=data.get("currency") or "сум",
         description=data.get("description"),
     )
 
